@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@supabase/supabase-js";
 import { Upload, CheckCircle, FileText, Loader2, AlertCircle, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,6 +9,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+
+// Create a dedicated anonymous client for uploads to ensure no session interference
+const SUPABASE_URL = "https://qzgzmytmfoozociuhgtp.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6Z3pteXRtZm9vem9jaXVoZ3RwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzOTQwOTEsImV4cCI6MjA3Njk3MDA5MX0.w0JiBV0cIH2ZFCDB9sUgrfBPlVUy_hiujQuRInJF29I";
+
+// Anonymous client for uploads - no session persistence
+const anonSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+  global: {
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+    },
+  },
+});
 
 type DocumentTypeId =
   | "educational_credentials"
@@ -120,7 +138,8 @@ export default function UploadDocuments() {
     }
 
     try {
-      const { data, error } = await supabase
+      // Use anonymous client for reading candidate data
+      const { data, error } = await anonSupabase
         .from("candidates")
         .select(`
           id,
@@ -145,7 +164,15 @@ export default function UploadDocuments() {
         return;
       }
 
-      setCandidateData(data as CandidateData);
+      // Handle jobs - Supabase returns as array but we expect single object
+      const jobsData = Array.isArray(data.jobs) && data.jobs.length > 0 
+        ? data.jobs[0] 
+        : (data.jobs as any);
+      
+      setCandidateData({
+        ...data,
+        jobs: jobsData ? { job_title: jobsData.job_title } : null,
+      } as CandidateData);
 
       // Load already uploaded documents
       loadUploadedDocuments(id);
@@ -163,7 +190,8 @@ export default function UploadDocuments() {
 
   const loadUploadedDocuments = async (candidateId: string) => {
     try {
-      const { data } = await supabase
+      // Use anonymous client for reading documents
+      const { data } = await anonSupabase
         .from("candidate_documents")
         .select("document_type, file_name, uploaded_at, document_name")
         .eq("candidate_id", candidateId)
@@ -262,26 +290,54 @@ export default function UploadDocuments() {
     setUploading((prev) => ({ ...prev, [key]: true }));
 
     try {
-      // Sanitize candidate name for folder name (remove special characters, replace spaces with underscores)
-      const sanitizedCandidateName = candidateData.full_name
-        .replace(/[^a-zA-Z0-9\s]/g, "")
-        .replace(/\s+/g, "_")
-        .trim();
+      // Ensure we're using anonymous access - clear any existing session
+      // This is important for anonymous uploads to work correctly
+      const { data: session } = await supabase.auth.getSession();
+      if (session?.session) {
+        console.log("Session detected, ensuring anonymous access for upload");
+        // Don't sign out, but ensure the storage call uses anon key
+      }
+
+      // Use candidate_id (UUID) for folder name to match storage policy pattern
+      // This ensures the folder name is long enough and matches the required pattern
+      const candidateIdFolder = id;
 
       for (const file of filesToUpload) {
         const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
         const timestamp = Date.now();
-        const storagePath = `${sanitizedCandidateName}/${docType}_${subKey || ""}${timestamp}_${sanitizedFileName}`;
+        const storagePath = `${candidateIdFolder}/${docType}_${subKey || ""}${timestamp}_${sanitizedFileName}`;
 
-        // Upload to Supabase Storage
-        const { error: uploadError } = await supabase.storage
+        console.log("Attempting upload:", {
+          bucket: "candidate-documents",
+          path: storagePath,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+        });
+
+        // Use anonymous client for upload to ensure no session interference
+        // This ensures the upload uses the anon key and anon policies
+        const { data: uploadData, error: uploadError } = await anonSupabase.storage
           .from("candidate-documents")
           .upload(storagePath, file, {
             cacheControl: "3600",
             upsert: false,
           });
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error("Storage upload error details:", {
+            error: uploadError,
+            message: uploadError.message,
+            statusCode: (uploadError as any)?.statusCode,
+            errorCode: (uploadError as any)?.error,
+            storagePath,
+            bucket: "candidate-documents",
+            candidateId: id,
+          });
+          throw uploadError;
+        }
+
+        console.log("Upload successful:", uploadData);
 
         // Determine document name (include subKey label for aadhar/pan)
         let documentName = DOCUMENT_TYPES.find((d) => d.id === docType)?.label || docType;
@@ -296,7 +352,8 @@ export default function UploadDocuments() {
         }
 
         // Check if this is the first document BEFORE inserting
-        const { data: existingDocs } = await supabase
+        // Use anonymous client for database operations too
+        const { data: existingDocs } = await anonSupabase
           .from("candidate_documents")
           .select("id")
           .eq("candidate_id", id)
@@ -304,8 +361,8 @@ export default function UploadDocuments() {
 
         const isFirstDocument = !existingDocs || existingDocs.length === 0;
 
-        // Save document record
-        const { error: dbError } = await supabase.from("candidate_documents").insert({
+        // Save document record using anonymous client
+        const { error: dbError } = await anonSupabase.from("candidate_documents").insert({
           candidate_id: id,
           document_type: docType,
           document_name: documentName,
@@ -316,14 +373,22 @@ export default function UploadDocuments() {
           verification_status: "pending",
         });
 
-        if (dbError) throw dbError;
+        if (dbError) {
+          console.error("Database insert error:", dbError);
+          throw dbError;
+        }
 
         // Update candidate status to 'submitted' when first document is uploaded
         if (isFirstDocument) {
-          await supabase
+          const { error: updateError } = await anonSupabase
             .from("candidates")
             .update({ document_verification_status: "submitted" })
             .eq("id", id);
+          
+          if (updateError) {
+            console.error("Candidate update error:", updateError);
+            // Don't throw - this is not critical for the upload
+          }
         }
       }
 
