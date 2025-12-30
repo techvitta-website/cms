@@ -14,7 +14,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Loader2, Mail, Search, Eye, CheckCircle, XCircle, Clock, FileText, Download, File } from "lucide-react";
+import { Loader2, Mail, Search, Eye, CheckCircle, XCircle, Clock, FileText, Download, File, Copy } from "lucide-react";
 import { openResume } from "@/lib/resume";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -351,33 +351,14 @@ export default function DocumentVerification() {
         throw new Error("Document request email has already been sent to this candidate.");
       }
 
-      // Generate unique token for upload link
-      const token = crypto.randomUUID() + "-" + Date.now();
-      const uploadLink = `${window.location.origin}/upload-documents/${token}`;
+      // Generate upload link using candidate ID (no token needed)
+      const uploadLink = `${window.location.origin}/${candidate.id}/upload-documents`;
       const deadline = new Date();
       deadline.setDate(deadline.getDate() + 7); // 7 days deadline
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30); // 30 days expiry
 
       // Get current user ID for requested_by
       const { data: { user } } = await supabase.auth.getUser();
       const requestedBy = user?.id || null;
-
-      // Create document_upload_tokens table record
-      const { data: tokenData, error: tokenError } = await supabase
-        .from("document_upload_tokens")
-        .insert({
-          candidate_id: candidate.id,
-          token: token,
-          expires_at: expiresAt.toISOString(),
-          upload_deadline: deadline.toISOString(),
-          requested_by: requestedBy,
-          status: "active",
-        })
-        .select()
-        .single();
-
-      if (tokenError) throw tokenError;
 
       // Update candidate status
       const { error: updateError } = await supabase
@@ -389,19 +370,6 @@ export default function DocumentVerification() {
 
       if (updateError) throw updateError;
 
-      // Create document request record
-      const { error: requestError } = await supabase
-        .from("document_requests")
-        .insert({
-          candidate_id: candidate.id,
-          upload_token_id: tokenData.id,
-          requested_by: requestedBy,
-          email_sent: false,
-          status: "pending",
-        });
-
-      if (requestError) throw requestError;
-
       // Call edge function to send email with upload link
       const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
         body: {
@@ -412,6 +380,7 @@ export default function DocumentVerification() {
             companyName: COMPANY_NAME,
             positionTitle: candidate.jobs?.job_title || "the role",
             uploadLink: uploadLink,
+            candidateId: candidate.id,
             deadline: deadline.toLocaleDateString("en-US", { 
               year: "numeric", 
               month: "long", 
@@ -433,26 +402,7 @@ export default function DocumentVerification() {
         throw new Error(emailData?.error || "Failed to send email");
       }
 
-      // Update document request with email sent info
-      await supabase
-        .from("document_requests")
-        .update({
-          email_sent: true,
-          email_sent_at: new Date().toISOString(),
-          status: "sent",
-        })
-        .eq("candidate_id", candidate.id)
-        .eq("upload_token_id", tokenData.id);
-
-      // Update token with email sent timestamp
-      await supabase
-        .from("document_upload_tokens")
-        .update({
-          email_sent_at: new Date().toISOString(),
-        })
-        .eq("id", tokenData.id);
-
-      return { token, uploadLink, deadline, tokenData };
+      return { uploadLink, deadline, candidateId: candidate.id };
     },
     onSuccess: (data, candidate) => {
       // Log document request email activity
@@ -745,6 +695,12 @@ export default function DocumentVerification() {
                 </div>
               ) : (
                 <div className="rounded-lg border border-muted bg-muted/40 p-4">
+                  <p className="text-sm font-medium mb-2">Upload Link Format:</p>
+                  <div className="p-2 bg-white border rounded-md mb-3">
+                    <code className="text-xs text-muted-foreground">
+                      {window.location.origin}/{"{candidate-id}"}/upload-documents
+                    </code>
+                  </div>
                   <p className="text-sm font-medium mb-2">Required Documents:</p>
                   <ul className="mt-2 text-sm text-muted-foreground list-disc list-inside space-y-1">
                     <li>Educational Credentials 10th to Highest</li>
@@ -754,7 +710,7 @@ export default function DocumentVerification() {
                     <li>Previously offer letters & Relieving letters, internship certificates (If Any)</li>
                   </ul>
                   <p className="text-sm text-muted-foreground mt-3">
-                    The candidate will receive an email with a secure upload link to submit these documents.
+                    The candidate will receive an email with their unique upload link and Candidate ID.
                   </p>
                 </div>
               )}

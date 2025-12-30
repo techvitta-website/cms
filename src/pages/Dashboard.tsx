@@ -107,7 +107,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
+
   const STORAGE_BUCKETS = ['resumes-private', 'resumes'];
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -359,14 +359,14 @@ export default function Dashboard() {
         .from('candidates')
         .select('id, document_verification_status')
         .eq('status', 'Interview Scheduled');
-      
+
       if (error) throw error;
-      
+
       // Count candidates who need document verification (not_requested or null)
       const count = (data || []).filter(
         (c: any) => !c.document_verification_status || c.document_verification_status === 'not_requested'
       ).length;
-      
+
       return count;
     },
   });
@@ -402,11 +402,11 @@ export default function Dashboard() {
       const pageSize = 1000; // Supabase max per page
       let hasMore = true;
       const seenIds = new Set<string>();
-      
+
       while (hasMore) {
         const { data, error } = await supabase
           .from('candidates')
-        .select(`
+          .select(`
             id,
             full_name,
             email,
@@ -423,8 +423,8 @@ export default function Dashboard() {
           `)
           .order('created_at', { ascending: false })
           .range(from, from + pageSize - 1);
-      
-      if (error) throw error;
+
+        if (error) throw error;
 
         if (data && data.length > 0) {
           for (const candidate of data as RawCandidate[]) {
@@ -452,29 +452,29 @@ export default function Dashboard() {
         }
       };
       const deletedFiles = getDeletedFiles();
-      
+
       // Filter out database candidates whose resume_url matches deleted file identifiers
       allCandidates = allCandidates.filter((candidate) => {
         if (!candidate.resume_url) return true;
-        
+
         const parsed = parseStorageLocation(candidate.resume_url);
         const isDeleted = deletedFiles.has(candidate.resume_url) ||
-                         (parsed.normalized && deletedFiles.has(parsed.normalized)) ||
-                         (parsed.filename && deletedFiles.has(parsed.filename)) ||
-                         (parsed.bucket && parsed.filename && deletedFiles.has(`${parsed.bucket}/${parsed.filename}`)) ||
-                         (parsed.bucket && parsed.filename && deletedFiles.has(`${parsed.bucket}-${parsed.filename}`));
-        
+          (parsed.normalized && deletedFiles.has(parsed.normalized)) ||
+          (parsed.filename && deletedFiles.has(parsed.filename)) ||
+          (parsed.bucket && parsed.filename && deletedFiles.has(`${parsed.bucket}/${parsed.filename}`)) ||
+          (parsed.bucket && parsed.filename && deletedFiles.has(`${parsed.bucket}-${parsed.filename}`));
+
         if (isDeleted) {
           console.log(`Filtering out deleted database candidate: ${candidate.id} (${candidate.resume_url})`);
         }
-        
+
         return !isDeleted;
       });
 
       // Step 2: Fetch all files from storage buckets
       const storageFiles = new Map<string, { name: string; created_at: string; bucket: string }>();
       const buckets = STORAGE_BUCKETS;
-      
+
       for (const bucket of buckets) {
         try {
           // List all files in the bucket (Supabase storage.list doesn't support offset, so we get all at once)
@@ -513,7 +513,7 @@ export default function Dashboard() {
       // Step 3: Create a map of existing candidates by resume_url and filename
       const candidatesByResumeUrl = new Map<string, RawCandidate>();
       const candidatesByFilename = new Map<string, RawCandidate>();
-      
+
       for (const candidate of allCandidates) {
         if (!candidate.resume_url) continue;
 
@@ -630,16 +630,16 @@ export default function Dashboard() {
             "eac", "vishwa"
           ];
           return badKeywords.some((kw) => lower.includes(kw)) ||
-                 /^https?:\/\//.test(s) ||
-                 /^\d+[\s\d-]*$/.test(s) ||
-                 /@/.test(s) ||
-                 /[.,;:!?\-]{2,}/.test(s) ||
-                 /\b(section|heading|title|header|project|feature|technolog)\b/i.test(lower) ||
-                 looksLikeSkillList(s) ||
-                 containsTechTerms(s) ||
-                 s.split(/[\s,]+/).some((w) => skillWords.has(w.toLowerCase().trim())) ||
-                 /^[A-Z][a-z]+\.\s*[A-Z][a-z]+$/.test(s) || // Pattern like "Rust. Strong"
-                 /^[A-Z]{1,2}$/.test(s.trim()); // Reject single/double letter initials like "RS"
+            /^https?:\/\//.test(s) ||
+            /^\d+[\s\d-]*$/.test(s) ||
+            /@/.test(s) ||
+            /[.,;:!?\-]{2,}/.test(s) ||
+            /\b(section|heading|title|header|project|feature|technolog)\b/i.test(lower) ||
+            looksLikeSkillList(s) ||
+            containsTechTerms(s) ||
+            s.split(/[\s,]+/).some((w) => skillWords.has(w.toLowerCase().trim())) ||
+            /^[A-Z][a-z]+\.\s*[A-Z][a-z]+$/.test(s) || // Pattern like "Rust. Strong"
+            /^[A-Z]{1,2}$/.test(s.trim()); // Reject single/double letter initials like "RS"
         };
 
         const allLines = text.split(/\r?\n/).map(cleanLine).filter(l => l.length > 0);
@@ -796,28 +796,28 @@ export default function Dashboard() {
           .replace(/[_-]+/g, ' ')
           .replace(/\b(resume|cv|curriculum|vitae|_)\b/ig, '')
           .trim();
-        
+
         if (fallback && fallback.length >= 2) {
           return formatName(fallback);
         }
-        
+
         return fileName;
       };
-      
+
       const extractEmailAndPhone = (text: string): { email: string | null; phone: string | null } => {
         // Extract email (more comprehensive pattern)
         const emailPatterns = [
           /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
           /\b[\w.%+-]+@[\w.-]+\.\w{2,}\b/gi,
         ];
-        
+
         let email: string | null = null;
         for (const pattern of emailPatterns) {
           const matches = text.match(pattern);
           if (matches && matches.length > 0) {
             // Filter out common false positives
-            const validEmail = matches.find(e => 
-              !e.includes('example.com') && 
+            const validEmail = matches.find(e =>
+              !e.includes('example.com') &&
               !e.includes('test.com') &&
               !e.includes('@resume.imported') &&
               !e.includes('@email.com')
@@ -828,7 +828,7 @@ export default function Dashboard() {
             }
           }
         }
-        
+
         // Extract phone (various formats including Indian numbers)
         const phonePatterns = [
           // Indian format: +91 9876543210 or 91 9876543210
@@ -842,14 +842,14 @@ export default function Dashboard() {
           // With spaces/dashes: 123 456 7890
           /(\d{3}[\s.-]\d{3}[\s.-]\d{4})/g,
         ];
-        
+
         let phone: string | null = null;
         for (const pattern of phonePatterns) {
           const matches = text.match(pattern);
           if (matches && matches.length > 0) {
             // Take the first match and clean it up
             let cleaned = matches[0].replace(/[\s().-]/g, '');
-            
+
             // Handle Indian numbers (91 prefix)
             if (cleaned.startsWith('91') && cleaned.length === 12) {
               phone = '+' + cleaned;
@@ -869,34 +869,34 @@ export default function Dashboard() {
                 phone = cleaned;
               }
             }
-            
+
             if (phone) break;
           }
         }
-        
+
         return { email, phone };
       };
 
       // Step 4: Process ALL storage files and extract name, email, phone for each one
       const storageOnlyFiles: Array<{ resumeUrl: string; fileInfo: { name: string; created_at: string; bucket: string } }> = [];
-      
+
       for (const [resumeUrl, fileInfo] of storageFiles.entries()) {
         // Skip if this file was deleted (check by resumeUrl, filename, and bucket/filename combination)
-        const isDeleted = deletedFiles.has(resumeUrl) || 
-                         deletedFiles.has(fileInfo.name) ||
-                         deletedFiles.has(`${fileInfo.bucket}/${fileInfo.name}`) ||
-                         deletedFiles.has(`${fileInfo.bucket}-${fileInfo.name}`);
-        
+        const isDeleted = deletedFiles.has(resumeUrl) ||
+          deletedFiles.has(fileInfo.name) ||
+          deletedFiles.has(`${fileInfo.bucket}/${fileInfo.name}`) ||
+          deletedFiles.has(`${fileInfo.bucket}-${fileInfo.name}`);
+
         if (isDeleted) {
           console.log(`Skipping deleted file: ${fileInfo.name}`);
           continue;
         }
 
         // Check if this file already has a candidate entry by filename
-        const existingCandidate = candidatesByFilename.get(fileInfo.name) || 
-                                  candidatesByResumeUrl.get(resumeUrl) ||
-                                  candidatesByResumeUrl.get(fileInfo.name);
-        
+        const existingCandidate = candidatesByFilename.get(fileInfo.name) ||
+          candidatesByResumeUrl.get(resumeUrl) ||
+          candidatesByResumeUrl.get(fileInfo.name);
+
         if (!existingCandidate) {
           storageOnlyFiles.push({ resumeUrl, fileInfo });
         }
@@ -905,19 +905,19 @@ export default function Dashboard() {
       // Process ALL files in batches to extract details (process 20 at a time to avoid blocking UI)
       const BATCH_SIZE = 20;
       const totalFiles = storageOnlyFiles.length;
-      
+
       console.log(`Processing ${totalFiles} storage files in batches of ${BATCH_SIZE}...`);
-      
+
       // Process all files in batches
       for (let batchStart = 0; batchStart < totalFiles; batchStart += BATCH_SIZE) {
         const batchEnd = Math.min(batchStart + BATCH_SIZE, totalFiles);
         const batch = storageOnlyFiles.slice(batchStart, batchEnd);
-        
+
         const extractionPromises = batch.map(async ({ resumeUrl, fileInfo }) => {
           // Extract name from filename as fallback
           const nameMatch = fileInfo.name.match(/\d+_\d+_(.+?)\.pdf$/i);
           let extractedName = 'Unknown';
-          
+
           if (nameMatch && nameMatch[1]) {
             extractedName = nameMatch[1]
               .replace(/[-_]/g, ' ')
@@ -930,21 +930,21 @@ export default function Dashboard() {
               .replace(/\s+/g, ' ')
               .trim();
           }
-          
+
           // Try to extract name, email and phone from the PDF
           let finalExtractedName = extractedName;
           let extractedEmail: string | null = null;
           let extractedPhone: string | null = null;
-          
+
           try {
             // Extract text (will get first page or limited text)
             const resumeText = await extractTextFromSupabaseStorage(supabase, fileInfo.bucket, fileInfo.name);
-            
+
             // Extract email and phone first (needed for name extraction)
             const { email, phone } = extractEmailAndPhone(resumeText);
             extractedEmail = email;
             extractedPhone = phone;
-            
+
             // Extract name from PDF text using matching engine logic (more accurate than filename)
             const pdfName = extractCandidateName(resumeText, email, fileInfo.name);
             if (pdfName && pdfName.length > 2) {
@@ -954,7 +954,7 @@ export default function Dashboard() {
             // If extraction fails, continue with filename-based name
             console.warn(`Could not extract data from ${fileInfo.name}:`, err);
           }
-          
+
           return {
             id: `storage-${fileInfo.bucket}-${fileInfo.name}`,
             full_name: finalExtractedName || 'Unknown',
@@ -980,13 +980,13 @@ export default function Dashboard() {
               const { resumeUrl, fileInfo } = batch[index];
               const nameMatch = fileInfo.name.match(/\d+_\d+_(.+?)\.pdf$/i);
               let extractedName = 'Unknown';
-              
+
               if (nameMatch && nameMatch[1]) {
                 extractedName = nameMatch[1].replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
               } else {
                 extractedName = fileInfo.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
               }
-              
+
               allCandidates.push({
                 id: `storage-${fileInfo.bucket}-${fileInfo.name}`,
                 full_name: extractedName || 'Unknown',
@@ -1001,13 +1001,13 @@ export default function Dashboard() {
             }
           }
         }
-        
+
         // Log progress
         if (batchEnd % (BATCH_SIZE * 5) === 0 || batchEnd === totalFiles) {
           console.log(`Processed ${batchEnd} of ${totalFiles} files...`);
         }
       }
-      
+
       console.log(`✅ Completed processing all ${totalFiles} storage files`);
 
       // Step 5: Final deduplication
@@ -1018,7 +1018,7 @@ export default function Dashboard() {
           uniqueCandidatesMap.set(key, candidate);
         }
       }
-      
+
       // Sort by created_at (most recent first)
       return Array.from(uniqueCandidatesMap.values()).sort((a, b) => {
         const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -1059,7 +1059,7 @@ export default function Dashboard() {
     // Step 3: Deduplicate by normalized name (same person, different uploads)
     const seenNames = new Map<string, RawCandidate>();
     const uniqueByName: RawCandidate[] = [];
-    
+
     for (const candidate of sortedCandidates) {
       // Normalize name: lowercase, trim, remove extra spaces, remove common suffixes and variations
       const normalizeName = (name: string | null): string | null => {
@@ -1067,13 +1067,13 @@ export default function Dashboard() {
         let normalized = name
           .trim()
           .toLowerCase();
-        
+
         // Replace underscores, hyphens, and special characters with spaces
         normalized = normalized.replace(/[_\-\s]+/g, ' ');
-        
+
         // Ensure single spaces
         normalized = normalized.replace(/\s+/g, ' ').trim();
-        
+
         // Remove common company/organization names and suffixes
         const removePatterns = [
           /\s*(resume|cv|curriculum|vitae)\s*(\d+)?\s*$/i,
@@ -1082,38 +1082,38 @@ export default function Dashboard() {
           /\s*(updatedcgpa|cgpa|gpa)\s*/gi,
           /\s*\d+\s*$/, // Trailing numbers
         ];
-        
+
         for (const pattern of removePatterns) {
           normalized = normalized.replace(pattern, ' ');
         }
-        
+
         // Remove any remaining trailing numbers and separators
         normalized = normalized.replace(/\s*[-_\s]*\d+\s*$/, '');
-        
+
         // Remove common prefixes
         normalized = normalized.replace(/^(mr|mrs|ms|miss|dr|prof)\s+/i, '');
-        
+
         // Clean up multiple spaces again
         normalized = normalized.replace(/\s+/g, ' ').trim();
-        
+
         return normalized.trim();
       };
-      
+
       const normalizedName = normalizeName(candidate.full_name);
-      
+
       if (normalizedName) {
         const existing = seenNames.get(normalizedName);
         if (existing) {
           // Keep the one with more recent created_at or better email
           const existingTime = existing.created_at ? new Date(existing.created_at).getTime() : 0;
           const currentTime = candidate.created_at ? new Date(candidate.created_at).getTime() : 0;
-          const existingHasRealEmail = existing.email && 
-            !existing.email.includes('@resume.imported') && 
+          const existingHasRealEmail = existing.email &&
+            !existing.email.includes('@resume.imported') &&
             !existing.email.includes('@email.com');
-          const currentHasRealEmail = candidate.email && 
-            !candidate.email.includes('@resume.imported') && 
+          const currentHasRealEmail = candidate.email &&
+            !candidate.email.includes('@resume.imported') &&
             !candidate.email.includes('@email.com');
-          
+
           // Prefer: real email > most recent
           if (currentHasRealEmail && !existingHasRealEmail) {
             // Replace with one that has real email
@@ -1147,7 +1147,7 @@ export default function Dashboard() {
     // Step 4: Deduplicate by resume_url (same file uploaded multiple times)
     const seenUrls = new Map<string, RawCandidate>();
     const finalCandidates: RawCandidate[] = [];
-    
+
     for (const candidate of uniqueByName) {
       if (candidate.resume_url) {
         const existing = seenUrls.get(candidate.resume_url);
@@ -1245,7 +1245,7 @@ export default function Dashboard() {
       const matchesStage = (() => {
         if (stageFilter.length === 0) return true;
         const status = candidate.status?.toLowerCase() || "pending";
-        
+
         return stageFilter.some((filter) => {
           switch (filter) {
             case "Applied":
@@ -1284,32 +1284,32 @@ export default function Dashboard() {
 
       return matchesSearch && matchesJob && matchesStage && matchesDate;
     });
-    
+
     // Final deduplication by ID, email, and normalized name to ensure no duplicates
     const seenIds = new Set<string>();
     const seenEmails = new Map<string, CandidateRow>();
     const seenNormalizedNames = new Map<string, CandidateRow>();
-    
+
     return filtered.filter((candidate) => {
       // Deduplicate by ID first
       if (seenIds.has(candidate.id)) {
         return false;
       }
       seenIds.add(candidate.id);
-      
+
       // Deduplicate by email (if email exists and is valid)
-      const candidateEmail = candidate.email && candidate.email !== "—" 
-        ? candidate.email.toLowerCase().trim() 
+      const candidateEmail = candidate.email && candidate.email !== "—"
+        ? candidate.email.toLowerCase().trim()
         : null;
-      
+
       if (candidateEmail && candidateEmail.length > 0) {
         const existingByEmail = seenEmails.get(candidateEmail);
-        
+
         if (existingByEmail) {
           // If we already have this email, keep the one with better data
           const existingTime = existingByEmail.createdAt ? new Date(existingByEmail.createdAt).getTime() : 0;
           const currentTime = candidate.createdAt ? new Date(candidate.createdAt).getTime() : 0;
-          
+
           // Keep the most recent one
           if (currentTime > existingTime) {
             // Replace with more recent one
@@ -1332,40 +1332,40 @@ export default function Dashboard() {
           // Skip this duplicate (keep existing one)
           return false;
         }
-        
+
         // New email, add it
         seenEmails.set(candidateEmail, candidate);
       }
-      
+
       // Additional deduplication by normalized name (for cases without email)
       const normalizeForDedup = (name: string): string => {
         let normalized = name.toLowerCase().trim();
-        
+
         // Replace underscores, hyphens with spaces
         normalized = normalized.replace(/[_\-\s]+/g, ' ');
         normalized = normalized.replace(/\s+/g, ' ').trim();
-        
+
         // Remove common suffixes and company names
         normalized = normalized.replace(/\s*(resume|cv|curriculum|vitae|updated|final|draft|version|revised|edited)\s*(\d+)?\s*$/i, '');
         normalized = normalized.replace(/\s*(techvitta|tech\s*vitta|company|corp|inc|llc|ltd|updatedcgpa|cgpa|gpa)\s*/gi, '');
         normalized = normalized.replace(/\s*\d+\s*$/, ''); // Trailing numbers
         normalized = normalized.replace(/\s+/g, ' ').trim();
-        
+
         return normalized;
       };
-      
+
       const normalizedName = normalizeForDedup(candidate.name);
       const existing = seenNormalizedNames.get(normalizedName);
-      
+
       if (existing) {
         // If we already have this normalized name, keep the one with better data
         const existingHasEmail = existing.email && existing.email !== "—" && !existing.email.includes('@resume.imported') && !existing.email.includes('@email.com');
         const currentHasEmail = candidate.email && candidate.email !== "—" && !candidate.email.includes('@resume.imported') && !candidate.email.includes('@email.com');
-        
+
         // Also check creation date to keep most recent
         const existingTime = existing.createdAt ? new Date(existing.createdAt).getTime() : 0;
         const currentTime = candidate.createdAt ? new Date(candidate.createdAt).getTime() : 0;
-        
+
         if (currentHasEmail && !existingHasEmail) {
           // Replace with one that has real email
           seenNormalizedNames.set(normalizedName, candidate);
@@ -1381,7 +1381,7 @@ export default function Dashboard() {
         // Skip this duplicate
         return false;
       }
-      
+
       seenNormalizedNames.set(normalizedName, candidate);
       return true;
     });
@@ -1444,7 +1444,7 @@ export default function Dashboard() {
       referenceSource: candidate.referenceSource || "",
     });
     setEditDialogOpen(true);
-    
+
     // Check if resume request email was already sent
     const email = candidate.email !== "—" ? candidate.email : "";
     if (email) {
@@ -1455,7 +1455,7 @@ export default function Dashboard() {
         .ilike("details", `%${email}%`)
         .order("created_at", { ascending: false })
         .limit(1);
-      
+
       if (!error && data && data.length > 0) {
         const sentDate = new Date(data[0].created_at);
         setLastResumeRequestSent({
@@ -1472,7 +1472,7 @@ export default function Dashboard() {
 
   const handleViewResumeRequestHistory = async () => {
     if (!editingCandidate) return;
-    
+
     const email = (editForm.email || editingCandidate.email || "").trim();
     if (!email) {
       toast({
@@ -1515,14 +1515,14 @@ export default function Dashboard() {
       if (candidate.id.startsWith('storage-')) {
         // Extract resume URL from the candidate
         let resumeUrl = candidate.resumeUrl;
-        
+
         if (!resumeUrl) {
           // Extract resume_url from the storage ID
           const withoutPrefix = candidate.id.replace('storage-', '');
           const knownBuckets = STORAGE_BUCKETS;
           let bucket = 'resumes-private'; // default
           let filename = withoutPrefix;
-          
+
           for (const knownBucket of knownBuckets) {
             if (withoutPrefix.startsWith(knownBucket + '-')) {
               bucket = knownBucket;
@@ -1530,7 +1530,7 @@ export default function Dashboard() {
               break;
             }
           }
-          
+
           resumeUrl = `${bucket}/${filename}`;
         }
 
@@ -1611,7 +1611,7 @@ export default function Dashboard() {
   const handleDeleteClick = async (candidate: CandidateRow) => {
     console.log("Delete clicked for candidate:", candidate.id, candidate.name);
     setDeleting(true);
-    
+
     try {
       let resumeUrlToDelete: string | null = null;
       let resumeHashToDelete: string | null = null;
@@ -1707,11 +1707,14 @@ export default function Dashboard() {
         console.log("Candidate deleted from database");
 
         if (resumeHashToDelete) {
-          await supabase
+          const { error: deleteHashError } = await supabase
             .from("resume_upload_hashes")
             .delete()
-            .eq("file_hash", resumeHashToDelete)
-            .catch((err) => console.warn("Error deleting hash:", err));
+            .eq("file_hash", resumeHashToDelete);
+
+          if (deleteHashError) {
+            console.warn("Error deleting hash:", deleteHashError.message);
+          }
         }
       }
 
@@ -1782,12 +1785,12 @@ export default function Dashboard() {
 
       if (fileDeleted && bucket && path) {
         console.log(`✅ Successfully deleted file: ${bucket}/${path}`);
-        
+
         // Store deleted file identifiers in localStorage to prevent re-importing
         try {
           const stored = localStorage.getItem('deleted-resume-files');
           const deletedSet = stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
-          
+
           // Store multiple identifiers to catch all variations
           const filename = path.split('/').pop() || path;
           deletedSet.add(`${bucket}/${path}`);
@@ -1800,7 +1803,7 @@ export default function Dashboard() {
             if (parsed.normalized) deletedSet.add(parsed.normalized);
             if (parsed.filename) deletedSet.add(parsed.filename);
           }
-          
+
           // Limit to last 1000 deleted files to prevent localStorage from growing too large
           const deletedArray = Array.from(deletedSet).slice(-1000);
           localStorage.setItem('deleted-resume-files', JSON.stringify(deletedArray));
@@ -1808,7 +1811,7 @@ export default function Dashboard() {
         } catch (storageError) {
           console.warn("Could not store deleted file in localStorage:", storageError);
         }
-        
+
         await new Promise((resolve) => setTimeout(resolve, 500));
         try {
           const { data: verifyFiles } = await supabase.storage
@@ -1832,7 +1835,7 @@ export default function Dashboard() {
           .from("resume_upload_hashes")
           .delete()
           .eq("file_hash", resumeHashToDelete);
-        
+
         if (hashDeleteError) {
           console.warn("Error deleting hash:", hashDeleteError);
         } else {
@@ -1851,7 +1854,7 @@ export default function Dashboard() {
         try {
           const stored = localStorage.getItem('deleted-resume-files');
           const deletedSet = stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
-          
+
           const urlToUse = resumeUrlToDelete || candidate.resumeUrl || '';
           if (urlToUse) {
             const parsed = parseStorageLocation(urlToUse);
@@ -1865,7 +1868,7 @@ export default function Dashboard() {
             }
             deletedSet.add(urlToUse);
           }
-          
+
           const deletedArray = Array.from(deletedSet).slice(-1000);
           localStorage.setItem('deleted-resume-files', JSON.stringify(deletedArray));
           console.log(`✅ Stored deleted candidate identifiers in localStorage`);
@@ -1899,11 +1902,11 @@ export default function Dashboard() {
       // Invalidate and refetch to ensure data consistency
       // This ensures deleted candidates don't reappear on refresh
       await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
-      
+
       try {
         const refetchResult = await refetchCandidates();
         console.log("Refetch completed:", refetchResult);
-        
+
         // After refetch, ensure deleted candidate is still not in the list
         queryClient.setQueryData(['all-candidates-with-storage'], (currentData: RawCandidate[] | undefined) => {
           if (!currentData) return currentData;
@@ -1924,15 +1927,15 @@ export default function Dashboard() {
         title: "Candidate Deleted",
         description: `${candidate.name} has been permanently deleted.`,
       });
-      
+
       console.log("✅ Delete operation completed successfully - candidate will not reappear on refresh");
     } catch (error: any) {
       console.error("Error deleting candidate:", error);
-      
+
       // Revert optimistic update on error
       await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
       await refetchCandidates();
-      
+
       toast({
         title: "Error",
         description: error.message || "Failed to delete candidate. Please try again.",
@@ -1991,7 +1994,7 @@ export default function Dashboard() {
       // Upload resume file if provided
       if (newCandidateForm.resumeFile) {
         const file = newCandidateForm.resumeFile;
-        
+
         if (!/\.pdf$/i.test(file.name)) {
           toast({
             title: "Invalid File",
@@ -2003,7 +2006,7 @@ export default function Dashboard() {
         }
 
         resumeHash = await computeFileHash(file);
-        
+
         // Check if file already exists
         const { data: existingCandidate } = await supabase
           .from("candidates")
@@ -2024,14 +2027,14 @@ export default function Dashboard() {
         // Upload to storage
         const envBucket = (import.meta as any).env?.VITE_SUPABASE_RESUMES_BUCKET || "resumes-private";
         const candidateBuckets = Array.from(new Set([envBucket, "resumes-private", "resumes"]));
-        
+
         const timestamp = Date.now();
         const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
         const storageFileName = `${timestamp}_0_${sanitizedFileName}`;
 
         let uploaded = false;
         let usedBucket = "";
-        
+
         for (const BUCKET_NAME of candidateBuckets) {
           const { error: uploadError } = await supabase.storage
             .from(BUCKET_NAME)
@@ -2060,10 +2063,13 @@ export default function Dashboard() {
         }
 
         // Record hash
-        await supabase
+        const { error: hashError } = await supabase
           .from("resume_upload_hashes")
-          .insert({ file_hash: resumeHash, original_name: file.name })
-          .catch(() => {}); // Ignore errors if hash already exists
+          .insert({ file_hash: resumeHash, original_name: file.name });
+
+        if (hashError) {
+          console.warn("Hash already exists or failed to record:", hashError.message);
+        }
       }
 
       // Create candidate record - store exactly like other candidates
@@ -2128,7 +2134,7 @@ export default function Dashboard() {
 
       // Refresh the candidates list - invalidate and refetch immediately
       await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
-      
+
       // Force immediate refetch to show the new candidate
       await queryClient.refetchQueries({ queryKey: ["all-candidates-with-storage"] });
     } catch (error: any) {
@@ -2198,14 +2204,14 @@ export default function Dashboard() {
           // Upload to storage
           const envBucket = (import.meta as any).env?.VITE_SUPABASE_RESUMES_BUCKET || "resumes-private";
           const candidateBuckets = Array.from(new Set([envBucket, "resumes-private", "resumes"]));
-          
+
           const timestamp = Date.now();
           const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
           const storageFileName = `${timestamp}_${i}_${sanitizedFileName}`;
 
           let uploaded = false;
           let resumeUrl: string | null = null;
-          
+
           for (const BUCKET_NAME of candidateBuckets) {
             const { error: uploadError } = await supabase.storage
               .from(BUCKET_NAME)
@@ -2229,10 +2235,13 @@ export default function Dashboard() {
           }
 
           // Record hash
-          await supabase
+          const { error: hashError } = await supabase
             .from("resume_upload_hashes")
-            .insert({ file_hash: resumeHash, original_name: file.name })
-            .catch(() => {}); // Ignore errors if hash already exists
+            .insert({ file_hash: resumeHash, original_name: file.name });
+
+          if (hashError) {
+            console.warn("Hash already exists or failed to record:", hashError.message);
+          }
 
           // Extract data from PDF
           let extractedName = 'Unknown';
@@ -2243,7 +2252,7 @@ export default function Dashboard() {
             // Parse resumeUrl to extract bucket and file path
             const [bucketName, ...pathParts] = resumeUrl.split('/');
             const filePath = pathParts.join('/');
-            
+
             const text = await extractTextFromSupabaseStorage(supabase, bucketName, filePath);
             if (text && text.length > 10) {
               // Extract email and phone first (needed for name extraction)
@@ -2252,13 +2261,13 @@ export default function Dashboard() {
                   /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
                   /\b[\w.%+-]+@[\w.-]+\.\w{2,}\b/gi,
                 ];
-                
+
                 let email: string | null = null;
                 for (const pattern of emailPatterns) {
                   const matches = text.match(pattern);
                   if (matches && matches.length > 0) {
-                    const validEmail = matches.find(e => 
-                      !e.includes('example.com') && 
+                    const validEmail = matches.find(e =>
+                      !e.includes('example.com') &&
                       !e.includes('test.com') &&
                       !e.includes('@resume.imported') &&
                       !e.includes('@email.com')
@@ -2269,7 +2278,7 @@ export default function Dashboard() {
                     }
                   }
                 }
-                
+
                 const phonePatterns = [
                   /(\+?91[\s.-]?[6-9]\d{9})/g,
                   /(\+\d{1,3}[\s.-]?\d{1,4}[\s.-]?\d{1,4}[\s.-]?\d{1,9})/g,
@@ -2277,13 +2286,13 @@ export default function Dashboard() {
                   /(\+?\d{10,15})/g,
                   /(\d{3}[\s.-]\d{3}[\s.-]\d{4})/g,
                 ];
-                
+
                 let phone: string | null = null;
                 for (const pattern of phonePatterns) {
                   const matches = text.match(pattern);
                   if (matches && matches.length > 0) {
                     let cleaned = matches[0].replace(/[\s().-]/g, '');
-                    
+
                     if (cleaned.startsWith('91') && cleaned.length === 12) {
                       phone = '+' + cleaned;
                     } else if (cleaned.length >= 10) {
@@ -2299,11 +2308,11 @@ export default function Dashboard() {
                         phone = cleaned;
                       }
                     }
-                    
+
                     if (phone) break;
                   }
                 }
-                
+
                 return { email, phone };
               };
 
@@ -2409,34 +2418,34 @@ export default function Dashboard() {
                     // Common skill patterns
                     "strong", "proficient", "experienced", "familiar", "knowledge", "expertise"
                   ];
-                  
+
                   // Check for university/institution patterns
                   const universityPatterns = [
                     /\b(university|college|institute|institution|academy|school|vidyapeetham|polytechnic)\b/i,
                     /\b(engineering|management|studies|campus|department|faculty)\b/i,
                     /\b(amrita|iit|nit|iim|bits|vit|srm|manipal)\b/i
                   ];
-                  
+
                   // Check for skill-like patterns (e.g., "Rust. Strong", "Java. Expert")
                   const skillPattern = /^[A-Z][a-z]+\.\s*[A-Z][a-z]+$/;
-                  
+
                   // Check if it looks like a skill list or tech stack
                   const words = lower.split(/\s+/).filter(w => w.length > 0);
                   const skillWordCount = words.filter(w => skillWords.has(w.trim())).length;
                   const isLikelySkillList = skillWordCount >= 2 || (skillWordCount >= 1 && words.length <= 3);
-                  
+
                   return badKeywords.some((kw) => lower.includes(kw)) ||
-                         /^https?:\/\//.test(s) ||
-                         /^\d+[\s\d-]*$/.test(s) ||
-                         /@/.test(s) ||
-                         /[.,;:!?\-]{2,}/.test(s) ||
-                         /\b(section|heading|title|header|project|feature|technolog)\b/i.test(lower) ||
-                         looksLikeSkillList(s) ||
-                         containsTechTerms(s) ||
-                         s.split(/[\s,]+/).some((w) => skillWords.has(w.toLowerCase().trim()))
-                         || universityPatterns.some(pattern => pattern.test(s))
-                         || skillPattern.test(s)
-                         || isLikelySkillList;
+                    /^https?:\/\//.test(s) ||
+                    /^\d+[\s\d-]*$/.test(s) ||
+                    /@/.test(s) ||
+                    /[.,;:!?\-]{2,}/.test(s) ||
+                    /\b(section|heading|title|header|project|feature|technolog)\b/i.test(lower) ||
+                    looksLikeSkillList(s) ||
+                    containsTechTerms(s) ||
+                    s.split(/[\s,]+/).some((w) => skillWords.has(w.toLowerCase().trim()))
+                    || universityPatterns.some(pattern => pattern.test(s))
+                    || skillPattern.test(s)
+                    || isLikelySkillList;
                 };
 
                 const allLines = text.split(/\r?\n/).map(cleanLine).filter(l => l.length > 0);
@@ -2593,11 +2602,11 @@ export default function Dashboard() {
                   .replace(/[_-]+/g, ' ')
                   .replace(/\b(resume|cv|curriculum|vitae|_)\b/ig, '')
                   .trim();
-                
+
                 if (fallback && fallback.length >= 2) {
                   return formatName(fallback);
                 }
-                
+
                 return fileName;
               };
 
@@ -2719,7 +2728,7 @@ export default function Dashboard() {
       if (editingCandidate.id.startsWith('storage-')) {
         // Use resumeUrl from candidate if available, otherwise extract from ID
         let resumeUrl = editingCandidate.resumeUrl;
-        
+
         if (!resumeUrl) {
           // Extract resume_url from the storage ID
           // Format: storage-{bucket}-{filename}
@@ -2729,7 +2738,7 @@ export default function Dashboard() {
           const knownBuckets = STORAGE_BUCKETS;
           let bucket = 'resumes-private'; // default
           let filename = withoutPrefix;
-          
+
           for (const knownBucket of knownBuckets) {
             if (withoutPrefix.startsWith(knownBucket + '-')) {
               bucket = knownBucket;
@@ -2737,7 +2746,7 @@ export default function Dashboard() {
               break;
             }
           }
-          
+
           resumeUrl = `${bucket}/${filename}`;
         }
 
@@ -2823,7 +2832,7 @@ export default function Dashboard() {
 
       // Invalidate and refetch
       await queryClient.invalidateQueries({ queryKey: ['all-candidates-with-storage'] });
-      
+
       setEditDialogOpen(false);
       setEditingCandidate(null);
     } catch (error: any) {
@@ -2912,7 +2921,7 @@ export default function Dashboard() {
               >
                 <RefreshCw className="h-4 w-4 text-primary" />
               </Button>
-            <Users className="h-5 w-5 text-primary" />
+              <Users className="h-5 w-5 text-primary" />
             </div>
           </CardHeader>
           <CardContent>
@@ -3089,8 +3098,8 @@ export default function Dashboard() {
                     {stageFilter.length === 0
                       ? "All stages"
                       : stageFilter.length === 1
-                      ? stageFilter[0]
-                      : `${stageFilter.length} stages selected`}
+                        ? stageFilter[0]
+                        : `${stageFilter.length} stages selected`}
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
@@ -3167,25 +3176,25 @@ export default function Dashboard() {
           </div>
 
           <div className="overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
+            <Table>
+              <TableHeader>
+                <TableRow>
                   <TableHead>Candidate</TableHead>
                   <TableHead>Job Applied</TableHead>
                   <TableHead>Stage</TableHead>
-                <TableHead>Email</TableHead>
+                  <TableHead>Email</TableHead>
                   <TableHead className="text-right">Phone</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredCandidates.length === 0 ? (
-                <TableRow>
+                  <TableRow>
                     <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                       No candidates match the current filters.
-                  </TableCell>
-                </TableRow>
-              ) : (
+                    </TableCell>
+                  </TableRow>
+                ) : (
                   filteredCandidates.map((candidate) => (
                     <TableRow
                       key={candidate.id}
@@ -3236,7 +3245,7 @@ export default function Dashboard() {
                       <TableCell className="text-right text-sm text-foreground">
                         {candidate.phone}
                       </TableCell>
-                    <TableCell className="text-right">
+                      <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
                           {candidate.resumeUrl ? (
                             <Button
@@ -3283,12 +3292,12 @@ export default function Dashboard() {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>
@@ -3341,27 +3350,27 @@ export default function Dashboard() {
                               </span>
                             </div>
                           ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="self-start"
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="self-start"
                               disabled={requestResumeEmailMutation.isPending || !editForm.referenceSource}
-                          onClick={() => requestResumeEmailMutation.mutate()}
+                              onClick={() => requestResumeEmailMutation.mutate()}
                               title={!editForm.referenceSource ? "Please select a Reference Source first" : ""}
-                        >
-                          {requestResumeEmailMutation.isPending ? (
-                            <>
-                              <Mail className="h-4 w-4 mr-2 animate-pulse" />
-                              Sending request...
-                            </>
-                          ) : (
-                            <>
-                              <Mail className="h-4 w-4 mr-2" />
-                              Request Resume Mail
-                            </>
-                          )}
-                        </Button>
+                            >
+                              {requestResumeEmailMutation.isPending ? (
+                                <>
+                                  <Mail className="h-4 w-4 mr-2 animate-pulse" />
+                                  Sending request...
+                                </>
+                              ) : (
+                                <>
+                                  <Mail className="h-4 w-4 mr-2" />
+                                  Request Resume Mail
+                                </>
+                              )}
+                            </Button>
                           )}
                           <Button
                             type="button"
@@ -3384,7 +3393,7 @@ export default function Dashboard() {
                       onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (!file || !editingCandidate) return;
-                        
+
                         if (!/\.pdf$/i.test(file.name)) {
                           toast({
                             title: "Invalid File",
@@ -3399,14 +3408,14 @@ export default function Dashboard() {
                           const resumeHash = await computeFileHash(file);
                           const envBucket = (import.meta as any).env?.VITE_SUPABASE_RESUMES_BUCKET || "resumes-private";
                           const candidateBuckets = Array.from(new Set([envBucket, "resumes-private", "resumes"]));
-                          
+
                           const timestamp = Date.now();
                           const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
                           const storageFileName = `${timestamp}_0_${sanitizedFileName}`;
 
                           let uploaded = false;
                           let resumeUrl: string | null = null;
-                          
+
                           for (const BUCKET_NAME of candidateBuckets) {
                             const { error: uploadError } = await supabase.storage
                               .from(BUCKET_NAME)
@@ -3731,8 +3740,8 @@ export default function Dashboard() {
                   className="w-full"
                 >
                   <Upload className="h-4 w-4 mr-2" />
-                  {selectedResumeFiles.length > 0 
-                    ? `${selectedResumeFiles.length} file(s) selected` 
+                  {selectedResumeFiles.length > 0
+                    ? `${selectedResumeFiles.length} file(s) selected`
                     : "Choose Resume Files"}
                 </Button>
                 {selectedResumeFiles.length > 0 && (
@@ -3786,12 +3795,12 @@ export default function Dashboard() {
             >
               Cancel
             </Button>
-            <Button 
-              onClick={handleBulkUploadResumes} 
+            <Button
+              onClick={handleBulkUploadResumes}
               disabled={uploadingResumes || selectedResumeFiles.length === 0}
             >
-              {uploadingResumes 
-                ? `Uploading... (${uploadProgress.current}/${uploadProgress.total})` 
+              {uploadingResumes
+                ? `Uploading... (${uploadProgress.current}/${uploadProgress.total})`
                 : `Upload ${selectedResumeFiles.length} Resume(s)`}
             </Button>
           </DialogFooter>

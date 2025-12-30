@@ -14,6 +14,7 @@ import Interview from "./pages/Interview";
 import Feedback from "./pages/Feedback";
 import DocumentVerification from "./pages/DocumentVerification";
 import UploadDocuments from "./pages/UploadDocuments";
+import UploadDocumentsLanding from "./pages/UploadDocumentsLanding";
 import OfferLetter from "./pages/OfferLetter";
 import ExperienceLetter from "./pages/ExperienceLetter";
 import NotFound from "./pages/NotFound";
@@ -30,11 +31,11 @@ const App = () => (
       <Sonner />
       <AuthProvider>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
+          <Routes>
             <Route path="/login" element={<Login />} />
             {/* Public upload page - no authentication required */}
-            <Route path="/upload-documents/:token" element={<UploadDocuments />} />
-
+            <Route path="/upload-documents" element={<UploadDocumentsLanding />} />
+            <Route path="/:id/upload-documents" element={<UploadDocuments />} />
             <Route
               path="/dashboard"
               element={
@@ -148,9 +149,9 @@ const App = () => (
             /> */}
 
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
