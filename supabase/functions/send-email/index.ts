@@ -21,6 +21,7 @@ interface EmailRequest {
     | "shortlist"
     | "interview"
     | "documents"
+    | "cid-document-request"
     | "offer-letter"
     | "reject"
     | "offer-letter-upload"
@@ -51,6 +52,9 @@ interface EmailRequest {
     joiningLocation?: string;
     // Documents
     requiredDocuments?: string[];
+    // CID Document Request
+    uploadLink?: string;
+    deadline?: string;
     // Rejection feedback
     feedbackNotes?: string;
     // Attachment for uploaded offer letters
@@ -291,6 +295,60 @@ serve(async (req) => {
         `;
         break;
       }
+
+      case "cid-document-request": {
+        const positionTitle = data?.positionTitle || "the role";
+        const uploadLink = data?.uploadLink || "#";
+        const deadline = data?.deadline || "7 days from today";
+        
+        const documentsList = data?.requiredDocuments?.length
+          ? `<ul>${data.requiredDocuments.map((doc: string) => `<li>${doc}</li>`).join("")}</ul>`
+          : `
+            <ul>
+              <li>Educational Credentials 10th to Highest</li>
+              <li>Latest resume copy (Updated) with local address</li>
+              <li>ID proof (Aadhar Card & PAN Card) for KYC</li>
+              <li>Professional / Course Certificates (If Any)</li>
+              <li>Previous offer letters & relieving letters, internship certificates</li>
+            </ul>
+          `;
+
+        subject = `Documents Required – ${positionTitle}`;
+
+        htmlContent = `
+          <div style="font-family: Arial; line-height:1.6; color:#222;">
+            <p>Dear ${candidateName},</p>
+            <p>
+              Thank you for your interest for the position of <b>${positionTitle}</b> (paid/unpaid) at our company.
+              As part of the hiring process, we kindly request you to share the following
+              documents with us for further evaluation:
+            </p>
+            ${documentsList}
+            <p>
+              Please ensure all documents are either in PDF or JPEG format and clearly
+              labelled with your name and document type.
+            </p>
+            <p style="background-color: #f0f9ff; padding: 15px; border-left: 4px solid #3b82f6; margin: 20px 0;">
+              <b>📎 UPLOAD LINK:</b><br/>
+              <a href="${uploadLink}" style="color: #3b82f6; word-break: break-all; font-size: 14px;">${uploadLink}</a>
+            </p>
+            <p><b>⏰ DEADLINE:</b> ${deadline}</p>
+            <p>
+              We appreciate your promptness in providing these documents as they will enable
+              us to proceed with the evaluation process effectively.
+            </p>
+            <p>If you have any questions, feel free to reach out.</p>
+            <p>
+              HR Manager<br/>
+              Techvitta Innovations Pvt Ltd<br/>
+              Address: 3rd Floor, Plot No 19, Opp Cyber Pearl, Hitech City, Madhapur,
+              Hyderabad, Telangana 500081.
+            </p>
+          </div>
+        `;
+        break;
+      }
+
       default:
         throw new Error(`Unknown email type: ${emailType}`);
     }

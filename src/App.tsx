@@ -6,13 +6,14 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Resumes from "./pages/Resumes";
-import Jobs from "./pages/Jobs";
-import Matching from "./pages/Matching";
+import RecruitmentHub from "./pages/RecruitmentHub";
 import HRUsers from "./pages/HRUsers";
 import Logs from "./pages/Logs";
 import Shortlist from "./pages/Shortlist";
 import Interview from "./pages/Interview";
 import Feedback from "./pages/Feedback";
+import DocumentVerification from "./pages/DocumentVerification";
+import UploadDocuments from "./pages/UploadDocuments";
 import OfferLetter from "./pages/OfferLetter";
 import ExperienceLetter from "./pages/ExperienceLetter";
 import NotFound from "./pages/NotFound";
@@ -31,6 +32,8 @@ const App = () => (
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
             <Route path="/login" element={<Login />} />
+            {/* Public upload page - no authentication required */}
+            <Route path="/upload-documents/:token" element={<UploadDocuments />} />
 
             <Route
               path="/dashboard"
@@ -47,25 +50,18 @@ const App = () => (
               and the sidebar entry when the feature is ready.
             */}
             <Route
-              path="/jobs"
+              path="/recruitment-hub"
               element={
                 <ProtectedRoute>
                   <Layout>
-                    <Jobs />
+                    <RecruitmentHub />
                   </Layout>
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/matching"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Matching />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
+            {/* Redirect old routes to new merged module */}
+            <Route path="/jobs" element={<Navigate to="/recruitment-hub" replace />} />
+            <Route path="/matching" element={<Navigate to="/recruitment-hub" replace />} />
             <Route
               path="/shortlist"
               element={
@@ -92,6 +88,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Layout>
                     <Feedback />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/document-verification"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <DocumentVerification />
                   </Layout>
                 </ProtectedRoute>
               }

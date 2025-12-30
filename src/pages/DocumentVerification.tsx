@@ -1,0 +1,952 @@
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import CandidateCard from "@/components/CandidateCard";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Loader2, Mail, Search, Eye, CheckCircle, XCircle, Clock, FileText, Download, File } from "lucide-react";
+import { openResume } from "@/lib/resume";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
+
+// Document types matching the email template
+const DOCUMENT_TYPES = [
+  { id: 'educational_credentials', label: 'Educational Credentials 10th to Highest', required: true },
+  { id: 'resume_copy', label: 'Latest resume copy. (Updated) with local address.', required: true },
+  { id: 'id_proof', label: 'ID proof (Aadhar Card & PAN Card) For KYC', required: true },
+  { id: 'professional_certificates', label: 'Professional / Course Certificates (If Any)', required: false },
+  { id: 'previous_employment', label: 'Previously offer letters & Relieving letters, internship certificates (If Any)', required: false },
+];
+
+interface Candidate {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  resume_url: string | null;
+  status: string;
+  job_id: string | null;
+  feedback_rating?: number | null;
+  feedback_notes?: string | null;
+  feedback_decision?: "Approve" | "Reject" | null;
+  feedback_submitted_at?: string | null;
+  document_verification_status?: string | null;
+  jobs?: {
+    job_title: string;
+    department: string | null;
+  } | null;
+}
+
+interface CandidateDocument {
+  id: string;
+  candidate_id: string;
+  document_type: string;
+  document_name: string;
+  file_url: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  uploaded_at: string;
+  verification_status: string;
+  verification_notes: string | null;
+  verified_at: string | null;
+}
+
+export default function DocumentVerification() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [isSendEmailDialogOpen, setIsSendEmailDialogOpen] = useState(false);
+  const [isViewDocumentsDialogOpen, setIsViewDocumentsDialogOpen] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState("pending");
+  const [candidateDocuments, setCandidateDocuments] = useState<CandidateDocument[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
+
+  // Fetch all approved candidates from Feedback page (refresh every 10 seconds)
+  // Show ALL candidates with feedback_decision = "Approve" (regardless of status)
+  const { data: candidates = [], isLoading } = useQuery({
+    queryKey: ["approved-candidates-documents"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("candidates")
+        .select(`
+          id,
+          full_name,
+          email,
+          phone,
+          resume_url,
+          status,
+          job_id,
+          feedback_rating,
+          feedback_notes,
+          feedback_decision,
+          feedback_submitted_at,
+          document_verification_status,
+          jobs (
+            job_title,
+            department
+          )
+        `)
+        .eq("feedback_decision", "Approve")
+        .not("feedback_decision", "is", null)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return (data ?? []) as unknown as Candidate[];
+    },
+    refetchInterval: 10000, // Refresh every 10 seconds to catch status updates
+  });
+
+  // Fetch document counts for each candidate (refresh every 10 seconds to catch new uploads)
+  const { data: documentCounts = {} } = useQuery({
+    queryKey: ["candidate-document-counts"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("candidate_documents")
+        .select("candidate_id");
+
+      if (error) throw error;
+      
+      const counts: { [key: string]: number } = {};
+      (data || []).forEach((doc: any) => {
+        counts[doc.candidate_id] = (counts[doc.candidate_id] || 0) + 1;
+      });
+      
+      return counts;
+    },
+    refetchInterval: 10000, // Refresh every 10 seconds to catch new document uploads
+  });
+
+  // Filter candidates based on document verification status
+  const filteredCandidates = useMemo(() => {
+    let filtered = candidates;
+
+    // Filter by tab
+    if (activeTab === "pending") {
+      filtered = candidates.filter(
+        (c) => !c.document_verification_status || c.document_verification_status === "not_requested"
+      );
+    } else if (activeTab === "requested") {
+      filtered = candidates.filter((c) => c.document_verification_status === "requested");
+    } else if (activeTab === "submitted") {
+      filtered = candidates.filter((c) => c.document_verification_status === "submitted");
+    } else if (activeTab === "verified") {
+      filtered = candidates.filter((c) => c.document_verification_status === "verified");
+    }
+
+    // Filter by search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (c) =>
+          c.full_name.toLowerCase().includes(term) ||
+          c.email.toLowerCase().includes(term) ||
+          c.phone?.toLowerCase().includes(term) ||
+          c.jobs?.job_title?.toLowerCase().includes(term)
+      );
+    }
+
+    return filtered;
+  }, [candidates, activeTab, searchTerm]);
+
+  // Counts for tabs
+  const counts = useMemo(() => {
+    return {
+      pending: candidates.filter(
+        (c) => !c.document_verification_status || c.document_verification_status === "not_requested"
+      ).length,
+      requested: candidates.filter((c) => c.document_verification_status === "requested").length,
+      submitted: candidates.filter((c) => c.document_verification_status === "submitted").length,
+      verified: candidates.filter((c) => c.document_verification_status === "verified").length,
+    };
+  }, [candidates]);
+
+  const handleViewResume = (resumeUrl: string | null) => {
+    if (resumeUrl) {
+      openResume(resumeUrl);
+    }
+  };
+
+  const handleSendDocumentRequest = (candidate: Candidate) => {
+    setSelectedCandidate(candidate);
+    setIsSendEmailDialogOpen(true);
+  };
+
+  const handleViewDocuments = async (candidate: Candidate) => {
+    setSelectedCandidate(candidate);
+    setIsViewDocumentsDialogOpen(true);
+    setLoadingDocuments(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from('candidate_documents')
+        .select('*')
+        .eq('candidate_id', candidate.id)
+        .order('uploaded_at', { ascending: false });
+
+      if (error) throw error;
+      setCandidateDocuments((data || []) as CandidateDocument[]);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load documents",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
+
+  const handleViewDocument = async (fileUrl: string) => {
+    try {
+      const [bucket, ...fileParts] = fileUrl.split('/');
+      const fileName = fileParts.join('/');
+      
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(fileName, 3600);
+      
+      if (error) throw error;
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank');
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error viewing document",
+        description: err.message || "Could not open document",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDownloadDocument = async (fileUrl: string, fileName: string) => {
+    try {
+      const [bucket, ...fileParts] = fileUrl.split('/');
+      const filePath = fileParts.join('/');
+      
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .download(filePath);
+      
+      if (error) throw error;
+      if (data) {
+        const url = window.URL.createObjectURL(data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast({
+          title: "Download started",
+          description: `Downloading ${fileName}`,
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error downloading document",
+        description: err.message || "Could not download document",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleVerifyDocument = async (docId: string, status: 'verified' | 'rejected') => {
+    setVerifyingDocId(docId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const verifiedBy = user?.id || null;
+
+      const { error } = await supabase
+        .from('candidate_documents')
+        .update({
+          verification_status: status,
+          verified_at: new Date().toISOString(),
+          verified_by: verifiedBy,
+        })
+        .eq('id', docId);
+
+      if (error) throw error;
+
+      // Update local state
+      setCandidateDocuments(prev =>
+        prev.map(doc =>
+          doc.id === docId
+            ? {
+                ...doc,
+                verification_status: status,
+                verified_at: new Date().toISOString(),
+              }
+            : doc
+        )
+      );
+
+      // Check if all documents are verified
+      const updatedDocs = candidateDocuments.map(doc =>
+        doc.id === docId ? { ...doc, verification_status: status } : doc
+      );
+      const allVerified = updatedDocs.every(doc => doc.verification_status === 'verified');
+      const allRequiredDocs = updatedDocs.filter(doc => 
+        ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
+      );
+      const allRequiredVerified = allRequiredDocs.length > 0 && 
+        allRequiredDocs.every(doc => doc.verification_status === 'verified');
+
+      if (allRequiredVerified && selectedCandidate) {
+        // Update candidate status to verified
+        await supabase
+          .from('candidates')
+          .update({ document_verification_status: 'verified' })
+          .eq('id', selectedCandidate.id);
+        
+        queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
+        queryClient.invalidateQueries({ queryKey: ["candidate-document-counts"] });
+      }
+
+      toast({
+        title: status === 'verified' ? "Document Verified" : "Document Rejected",
+        description: `Document has been marked as ${status}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update document status",
+        variant: "destructive",
+      });
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
+  // Send document request email mutation
+  const sendDocumentRequestMutation = useMutation({
+    mutationFn: async (candidate: Candidate) => {
+      // Prevent duplicate document request emails
+      const { data: existingLogs, error: historyError } = await supabase
+        .from("activity_logs")
+        .select("id")
+        .eq("action", "CID_DOCUMENT_REQUEST_SENT")
+        .ilike("details", `%${candidate.email}%`)
+        .limit(1);
+
+      if (!historyError && existingLogs && existingLogs.length > 0) {
+        throw new Error("Document request email has already been sent to this candidate.");
+      }
+
+      // Generate unique token for upload link
+      const token = crypto.randomUUID() + "-" + Date.now();
+      const uploadLink = `${window.location.origin}/upload-documents/${token}`;
+      const deadline = new Date();
+      deadline.setDate(deadline.getDate() + 7); // 7 days deadline
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30); // 30 days expiry
+
+      // Get current user ID for requested_by
+      const { data: { user } } = await supabase.auth.getUser();
+      const requestedBy = user?.id || null;
+
+      // Create document_upload_tokens table record
+      const { data: tokenData, error: tokenError } = await supabase
+        .from("document_upload_tokens")
+        .insert({
+          candidate_id: candidate.id,
+          token: token,
+          expires_at: expiresAt.toISOString(),
+          upload_deadline: deadline.toISOString(),
+          requested_by: requestedBy,
+          status: "active",
+        })
+        .select()
+        .single();
+
+      if (tokenError) throw tokenError;
+
+      // Update candidate status
+      const { error: updateError } = await supabase
+        .from("candidates")
+        .update({
+          document_verification_status: "requested",
+        })
+        .eq("id", candidate.id);
+
+      if (updateError) throw updateError;
+
+      // Create document request record
+      const { error: requestError } = await supabase
+        .from("document_requests")
+        .insert({
+          candidate_id: candidate.id,
+          upload_token_id: tokenData.id,
+          requested_by: requestedBy,
+          email_sent: false,
+          status: "pending",
+        });
+
+      if (requestError) throw requestError;
+
+      // Call edge function to send email with upload link
+      const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: candidate.email,
+          candidateName: candidate.full_name,
+          emailType: "cid-document-request",
+          data: {
+            companyName: COMPANY_NAME,
+            positionTitle: candidate.jobs?.job_title || "the role",
+            uploadLink: uploadLink,
+            deadline: deadline.toLocaleDateString("en-US", { 
+              year: "numeric", 
+              month: "long", 
+              day: "numeric" 
+            }),
+            requiredDocuments: [
+              "Educational Credentials 10th to Highest",
+              "Latest resume copy. (Updated) with local address.",
+              "ID proof (Aadhar Card & PAN Card) For KYC",
+              "Professional / Course Certificates (If Any)",
+              "Previously offer letters & Relieving letters, internship certificates (If Any)",
+            ],
+          },
+        },
+      });
+
+      if (emailError) throw emailError;
+      if (!emailData?.success) {
+        throw new Error(emailData?.error || "Failed to send email");
+      }
+
+      // Update document request with email sent info
+      await supabase
+        .from("document_requests")
+        .update({
+          email_sent: true,
+          email_sent_at: new Date().toISOString(),
+          status: "sent",
+        })
+        .eq("candidate_id", candidate.id)
+        .eq("upload_token_id", tokenData.id);
+
+      // Update token with email sent timestamp
+      await supabase
+        .from("document_upload_tokens")
+        .update({
+          email_sent_at: new Date().toISOString(),
+        })
+        .eq("id", tokenData.id);
+
+      return { token, uploadLink, deadline, tokenData };
+    },
+    onSuccess: (data, candidate) => {
+      // Log document request email activity
+      void supabase.from("activity_logs").insert({
+        action: "CID_DOCUMENT_REQUEST_SENT",
+        details: `CID document request email sent to ${candidate.full_name} (${candidate.email}) with link: ${data.uploadLink}`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["candidate-document-counts"] });
+      
+      // Show the created link
+      setCreatedLink(data.uploadLink);
+      
+      toast({
+        title: "Upload Link Created & Email Sent",
+        description: `Link created and email sent to ${candidate.email}`,
+        duration: 5000,
+      });
+      
+      // Keep dialog open to show the link for 10 seconds, then close
+      setTimeout(() => {
+        setIsSendEmailDialogOpen(false);
+        setSelectedCandidate(null);
+        setCreatedLink(null);
+      }, 10000);
+    },
+    onError: (error: any) => {
+      toast({
+        title:
+          error?.message === "Document request email has already been sent to this candidate."
+            ? "Already sent"
+            : "Error",
+        description: error.message || "Failed to send document request",
+        variant:
+          error?.message === "Document request email has already been sent to this candidate."
+            ? "default"
+            : "destructive",
+      });
+    },
+  });
+
+  const handleSendEmail = () => {
+    if (selectedCandidate) {
+      sendDocumentRequestMutation.mutate(selectedCandidate);
+    }
+  };
+
+  const getStatusBadge = (status: string | null | undefined) => {
+    if (!status || status === "not_requested") {
+      return <Badge variant="outline">Not Requested</Badge>;
+    }
+    const statusConfig: Record<string, { label: string; className: string }> = {
+      requested: { label: "Requested", className: "bg-yellow-100 text-yellow-800" },
+      submitted: { label: "Submitted", className: "bg-blue-100 text-blue-800" },
+      verified: { label: "Verified", className: "bg-green-100 text-green-800" },
+      rejected: { label: "Rejected", className: "bg-red-100 text-red-800" },
+    };
+    const config = statusConfig[status] || { label: status, className: "bg-gray-100 text-gray-800" };
+    return <Badge className={config.className}>{config.label}</Badge>;
+  };
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div>
+        <h1 className="text-3xl font-bold text-foreground">CID Verification</h1>
+        <p className="text-muted-foreground mt-1">
+          Request and verify candidate identification documents before sending offer letters
+        </p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pending Request
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{counts.pending}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Request Sent
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{counts.requested}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Documents Submitted
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{counts.submitted}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Verified
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{counts.verified}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="pending">
+            Pending {counts.pending > 0 && `(${counts.pending})`}
+          </TabsTrigger>
+          <TabsTrigger value="requested">
+            Requested {counts.requested > 0 && `(${counts.requested})`}
+          </TabsTrigger>
+          <TabsTrigger value="submitted">
+            Submitted {counts.submitted > 0 && `(${counts.submitted})`}
+          </TabsTrigger>
+          <TabsTrigger value="verified">
+            Verified {counts.verified > 0 && `(${counts.verified})`}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={activeTab} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="search">SEARCH CANDIDATE</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="search"
+                placeholder="Search by name, email, phone, or job title"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : filteredCandidates.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No candidates found</p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {filteredCandidates.map((candidate) => (
+                <CandidateCard
+                  key={candidate.id}
+                  id={candidate.id}
+                  fullName={candidate.full_name}
+                  email={candidate.email}
+                  phone={candidate.phone}
+                  resumeUrl={candidate.resume_url}
+                  appliedJob={candidate.jobs?.job_title || null}
+                  status={candidate.status}
+                  onViewResume={() => handleViewResume(candidate.resume_url)}
+                >
+                  {(candidate.feedback_notes || candidate.feedback_rating) && (
+                    <div className="mb-4 rounded-lg border border-muted bg-muted/40 p-4 text-sm space-y-1">
+                      <p className="font-medium text-foreground">Interview Feedback</p>
+                      {candidate.feedback_rating && (
+                        <p className="text-muted-foreground">
+                          Rating: {candidate.feedback_rating}/5
+                        </p>
+                      )}
+                      {candidate.feedback_notes && (
+                        <p className="text-muted-foreground whitespace-pre-wrap">
+                          Notes: {candidate.feedback_notes}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium whitespace-nowrap">Document Status:</span>
+                      {getStatusBadge(candidate.document_verification_status)}
+                      {documentCounts[candidate.id] > 0 && (
+                        <Badge variant="secondary" className="ml-2">
+                          {documentCounts[candidate.id]} document{documentCounts[candidate.id] > 1 ? 's' : ''} uploaded
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {(!candidate.document_verification_status ||
+                        candidate.document_verification_status === "not_requested") && (
+                        <Button
+                          onClick={() => handleSendDocumentRequest(candidate)}
+                          className="bg-gradient-primary hover:opacity-90 text-primary-foreground whitespace-nowrap"
+                        >
+                          <Mail className="h-4 w-4 mr-2" />
+                          Create Upload Link & Send Email
+                        </Button>
+                      )}
+                      {(candidate.document_verification_status === "submitted" ||
+                        candidate.document_verification_status === "requested") && (
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleViewDocuments(candidate)} 
+                          className="whitespace-nowrap"
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Documents ({documentCounts[candidate.id] || 0})
+                        </Button>
+                      )}
+                      {candidate.document_verification_status === "verified" && (
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleViewDocuments(candidate)} 
+                          className="whitespace-nowrap"
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Verified Documents ({documentCounts[candidate.id] || 0})
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CandidateCard>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Send Document Request Dialog */}
+      <Dialog open={isSendEmailDialogOpen} onOpenChange={setIsSendEmailDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create Upload Link & Send Email</DialogTitle>
+            <DialogDescription>
+              A unique upload link will be generated and sent to the candidate via email. The candidate can use this link to upload all required documents.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCandidate && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Candidate</Label>
+                <p className="text-sm font-medium">{selectedCandidate.full_name}</p>
+                <p className="text-sm text-muted-foreground">{selectedCandidate.email}</p>
+                {selectedCandidate.jobs?.job_title && (
+                  <p className="text-sm text-muted-foreground">
+                    Position: {selectedCandidate.jobs.job_title}
+                  </p>
+                )}
+              </div>
+              {createdLink ? (
+                <div className="rounded-lg border-2 border-green-500 bg-green-50 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <p className="text-sm font-semibold text-green-800">Upload Link Created Successfully!</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Upload Link:</Label>
+                    <div className="flex items-center gap-2 p-2 bg-white border rounded-md">
+                      <Input
+                        value={createdLink}
+                        readOnly
+                        className="flex-1 text-sm font-mono border-0 bg-transparent"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(createdLink);
+                          toast({
+                            title: "Link Copied!",
+                            description: "Upload link has been copied to clipboard",
+                          });
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      This link has been sent to the candidate via email. You can also copy it manually.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-muted bg-muted/40 p-4">
+                  <p className="text-sm font-medium mb-2">Required Documents:</p>
+                  <ul className="mt-2 text-sm text-muted-foreground list-disc list-inside space-y-1">
+                    <li>Educational Credentials 10th to Highest</li>
+                    <li>Latest resume copy. (Updated) with local address.</li>
+                    <li>ID proof (Aadhar Card & PAN Card) For KYC</li>
+                    <li>Professional / Course Certificates (If Any)</li>
+                    <li>Previously offer letters & Relieving letters, internship certificates (If Any)</li>
+                  </ul>
+                  <p className="text-sm text-muted-foreground mt-3">
+                    The candidate will receive an email with a secure upload link to submit these documents.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsSendEmailDialogOpen(false)}
+              disabled={sendingEmail}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendEmail}
+              disabled={sendingEmail || sendDocumentRequestMutation.isPending}
+              className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
+            >
+              {sendingEmail || sendDocumentRequestMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send Request
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Documents Dialog */}
+      <Dialog open={isViewDocumentsDialogOpen} onOpenChange={setIsViewDocumentsDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Uploaded Documents</DialogTitle>
+            <DialogDescription>
+              {selectedCandidate && (
+                <>Documents uploaded by {selectedCandidate.full_name}</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {loadingDocuments ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : candidateDocuments.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No documents uploaded yet</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {candidateDocuments.map((doc) => {
+                const docTypeInfo = DOCUMENT_TYPES.find(d => d.id === doc.document_type);
+                const getStatusBadge = () => {
+                  switch (doc.verification_status) {
+                    case 'verified':
+                      return <Badge className="bg-green-100 text-green-800">Verified</Badge>;
+                    case 'rejected':
+                      return <Badge className="bg-red-100 text-red-800">Rejected</Badge>;
+                    case 'revision_requested':
+                      return <Badge className="bg-yellow-100 text-yellow-800">Revision Requested</Badge>;
+                    default:
+                      return <Badge variant="outline">Pending</Badge>;
+                  }
+                };
+
+                return (
+                  <Card key={doc.id} className="border-2">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <File className="h-5 w-5 text-primary" />
+                            <h4 className="font-semibold">{docTypeInfo?.label || doc.document_name}</h4>
+                            {docTypeInfo?.required && (
+                              <Badge variant="outline" className="text-xs">Required</Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            File: {doc.file_name}
+                          </p>
+                          {doc.file_size && (
+                            <p className="text-xs text-muted-foreground">
+                              Size: {(doc.file_size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Uploaded: {new Date(doc.uploaded_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          {getStatusBadge()}
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2 mt-4 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleViewDocument(doc.file_url)}
+                          className="flex-1 min-w-[120px]"
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownloadDocument(doc.file_url, doc.file_name)}
+                          className="flex-1 min-w-[120px]"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Download
+                        </Button>
+                        {doc.verification_status === 'pending' && (
+                          <>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700 text-white flex-1 min-w-[120px]"
+                              onClick={() => handleVerifyDocument(doc.id, 'verified')}
+                              disabled={verifyingDocId === doc.id}
+                            >
+                              {verifyingDocId === doc.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Verifying...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="h-4 w-4 mr-2" />
+                                  Verify
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              className="flex-1 min-w-[120px]"
+                              onClick={() => handleVerifyDocument(doc.id, 'rejected')}
+                              disabled={verifyingDocId === doc.id}
+                            >
+                              {verifyingDocId === doc.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Processing...
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="h-4 w-4 mr-2" />
+                                  Reject
+                                </>
+                              )}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                      
+                      {doc.verification_notes && (
+                        <div className="mt-3 p-3 bg-muted rounded-lg">
+                          <p className="text-sm font-medium mb-1">Verification Notes:</p>
+                          <p className="text-sm text-muted-foreground">{doc.verification_notes}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsViewDocumentsDialogOpen(false);
+                setSelectedCandidate(null);
+                setCandidateDocuments([]);
+              }}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+

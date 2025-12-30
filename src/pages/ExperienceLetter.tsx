@@ -14,7 +14,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Award, Loader2, Upload, Search, UserPlus, Edit, Trash2, History, ExternalLink } from "lucide-react";
+import { Award, Loader2, Upload, Search, UserPlus, Edit, Trash2, History, ExternalLink, MessageSquare } from "lucide-react";
 import { openResume } from "@/lib/resume";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +43,18 @@ interface Candidate {
   } | null;
 }
 
+interface EmailReply {
+  id: string;
+  candidate_id: string | null;
+  candidate_email: string;
+  candidate_name: string | null;
+  subject: string | null;
+  reply_content: string;
+  received_at: string;
+  status: string;
+  email_stage: string | null;
+}
+
 export default function ExperienceLetter() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -51,6 +63,8 @@ export default function ExperienceLetter() {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [addCandidateDialogOpen, setAddCandidateDialogOpen] = useState(false);
+  const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
+  const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
   const [newCandidateForm, setNewCandidateForm] = useState({
     name: "",
     email: "",
@@ -170,26 +184,26 @@ export default function ExperienceLetter() {
       }
 
       if (!existingLogs || existingLogs.length === 0) {
-        const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
-          body: {
-            to: email,
-            candidateName: candidate.full_name,
-            emailType: "experience-letter-upload",
-            data: {
-              positionTitle: candidate.jobs?.job_title || "Intern",
-              attachment: {
-                filename: file.name,
-                content: fileBase64,
-                type: file.type || "application/pdf",
-              },
-              experience_letter_url: experienceLetterUrl,
+      const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: email,
+          candidateName: candidate.full_name,
+          emailType: "experience-letter-upload",
+          data: {
+            positionTitle: candidate.jobs?.job_title || "Intern",
+            attachment: {
+              filename: file.name,
+              content: fileBase64,
+              type: file.type || "application/pdf",
             },
+            experience_letter_url: experienceLetterUrl,
           },
-        });
+        },
+      });
 
-        if (emailError || !emailData?.success) {
-          console.warn("Email sending failed, but file uploaded:", emailError || emailData?.error);
-          // Don't throw - file is uploaded successfully
+      if (emailError || !emailData?.success) {
+        console.warn("Email sending failed, but file uploaded:", emailError || emailData?.error);
+        // Don't throw - file is uploaded successfully
         } else {
           emailSent = true;
           await supabase.from("activity_logs").insert({
@@ -247,6 +261,32 @@ export default function ExperienceLetter() {
   const handleFileSelect = (candidate: Candidate) => {
     setUploadCandidate(candidate);
     setIsUploadDialogOpen(true);
+  };
+
+  // Fetch email replies for experience-letter stage
+  const { data: emailReplies = [] } = useQuery({
+    queryKey: ["email-replies-experience"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("email_replies")
+        .select("*")
+        .eq("email_stage", "experience-letter")
+        .order("received_at", { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as EmailReply[];
+    },
+  });
+
+  const handleViewReplies = (candidate: Candidate) => {
+    setSelectedCandidateForReplies(candidate);
+    setRepliesDialogOpen(true);
+  };
+
+  const getCandidateReplies = (candidate: Candidate) => {
+    return emailReplies.filter(
+      (reply) => reply.candidate_email.toLowerCase() === candidate.email.toLowerCase()
+    );
   };
 
   const handleFileUpload = async (e: React.FormEvent) => {
@@ -843,7 +883,15 @@ export default function ExperienceLetter() {
                 candidate.resume_url && handleViewResume(candidate.resume_url)
               }
             >
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleViewReplies(candidate)}
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Replies ({getCandidateReplies(candidate).length})
+                </Button>
                 <Button 
                   onClick={() => handleEditClick(candidate)}
                   variant="outline"
@@ -1268,6 +1316,47 @@ export default function ExperienceLetter() {
         </DialogContent>
       </Dialog>
 
+      {/* Email Replies Dialog */}
+      <Dialog open={repliesDialogOpen} onOpenChange={setRepliesDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Replies from {selectedCandidateForReplies?.full_name || "Candidate"}</DialogTitle>
+            <DialogDescription>
+              Email replies received for experience letter stage.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedCandidateForReplies && getCandidateReplies(selectedCandidateForReplies).length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No email replies received yet from this candidate for experience letter stage.</p>
+              </div>
+            ) : (
+              selectedCandidateForReplies &&
+              getCandidateReplies(selectedCandidateForReplies).map((reply) => (
+                <div key={reply.id} className="border rounded-lg p-4 space-y-3 bg-card">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{reply.subject || "No Subject"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Received: {new Date(reply.received_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-xs">
+                      {reply.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm whitespace-pre-wrap border-t pt-3 text-muted-foreground bg-muted/30 p-3 rounded">
+                    {reply.reply_content.length > 500
+                      ? reply.reply_content.substring(0, 500) + "..."
+                      : reply.reply_content}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

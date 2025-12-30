@@ -21,6 +21,7 @@ import {
   History,
   Clock,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,7 @@ interface RawCandidate {
   job_id: string | null;
   resume_url: string | null;
   matches?: CandidateMatch[] | null;
+  reference_source?: string | null;
 }
 
 interface CandidateRow {
@@ -91,6 +93,7 @@ interface CandidateRow {
   createdAt: string | null;
   createdLabel: string | null;
   resumeUrl: string | null;
+  referenceSource?: string | null;
 }
 
 const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
@@ -113,6 +116,7 @@ export default function Dashboard() {
     name: "",
     email: "",
     phone: "",
+    referenceSource: "",
   });
   const [addCandidateDialogOpen, setAddCandidateDialogOpen] = useState(false);
   const [newCandidateForm, setNewCandidateForm] = useState({
@@ -143,9 +147,14 @@ export default function Dashboard() {
 
       const email = (editForm.email || editingCandidate.email || "").trim();
       const name = (editForm.name || editingCandidate.name || "Candidate").trim();
+      const referenceSource = (editForm.referenceSource || "").trim();
 
       if (!email) {
         throw new Error("Candidate email is missing");
+      }
+
+      if (!referenceSource) {
+        throw new Error("Please select a Reference Source before sending the resume request email.");
       }
 
       // Before sending, check if a request-resume email was already sent
@@ -169,6 +178,7 @@ export default function Dashboard() {
           emailType: "request-resume",
           data: {
             companyName: COMPANY_NAME,
+            referenceSource: referenceSource || undefined,
           },
         },
       });
@@ -342,6 +352,25 @@ export default function Dashboard() {
     },
   });
 
+  const { data: documentVerificationCount } = useQuery({
+    queryKey: ['document-verification-count'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select('id, document_verification_status')
+        .eq('status', 'Interview Scheduled');
+      
+      if (error) throw error;
+      
+      // Count candidates who need document verification (not_requested or null)
+      const count = (data || []).filter(
+        (c: any) => !c.document_verification_status || c.document_verification_status === 'not_requested'
+      ).length;
+      
+      return count;
+    },
+  });
+
   const { data: experienceLetterCount } = useQuery({
     queryKey: ['experience-letter-count'],
     queryFn: async () => {
@@ -386,6 +415,7 @@ export default function Dashboard() {
             created_at,
             job_id,
             resume_url,
+            reference_source,
             matches (
               match_score,
               job_id
@@ -1174,6 +1204,7 @@ export default function Dashboard() {
         createdAt: candidate.created_at,
         createdLabel,
         resumeUrl: candidate.resume_url,
+        referenceSource: candidate.reference_source ?? null,
       };
     });
   }, [jobMap, latestCandidatesRaw]);
@@ -1400,7 +1431,7 @@ export default function Dashboard() {
   const handleJobsCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      navigate("/jobs");
+      navigate("/recruitment-hub");
     }
   };
 
@@ -1410,6 +1441,7 @@ export default function Dashboard() {
       name: candidate.name === "Unknown" ? "" : candidate.name,
       email: candidate.email === "—" ? "" : candidate.email,
       phone: candidate.phone === "—" ? "" : candidate.phone,
+      referenceSource: candidate.referenceSource || "",
     });
     setEditDialogOpen(true);
     
@@ -2719,6 +2751,7 @@ export default function Dashboard() {
             resume_url: resumeUrl,
             status: 'Pending',
             resume_processed: false,
+            reference_source: editForm.referenceSource || null,
           })
           .select('id')
           .single();
@@ -2740,6 +2773,7 @@ export default function Dashboard() {
                   full_name: editForm.name.trim(),
                   phone: editForm.phone.trim() || null,
                   resume_url: resumeUrl,
+                  reference_source: editForm.referenceSource || null,
                 })
                 .eq('id', existing.id);
 
@@ -2825,7 +2859,7 @@ export default function Dashboard() {
             Upload Resumes
           </Button>
           <Button
-            onClick={() => navigate("/jobs")}
+            onClick={() => navigate("/recruitment-hub")}
             className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md w-full sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -2845,9 +2879,34 @@ export default function Dashboard() {
                 variant="ghost"
                 size="sm"
                 className="h-6 w-6 p-0"
-                onClick={() => {
-                  queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
-                  refetchCandidates();
+                onClick={async () => {
+                  // Refresh all dashboard data
+                  await Promise.all([
+                    queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] }),
+                    queryClient.invalidateQueries({ queryKey: ["jobs-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["shortlisted-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["interview-scheduled-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["feedback-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["document-verification-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["approved-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["experience-letter-count"] }),
+                    queryClient.invalidateQueries({ queryKey: ["job-basic-info"] }),
+                  ]);
+                  await Promise.all([
+                    refetchCandidates(),
+                    queryClient.refetchQueries({ queryKey: ["jobs-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["shortlisted-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["interview-scheduled-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["feedback-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["document-verification-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["approved-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["experience-letter-count"] }),
+                    queryClient.refetchQueries({ queryKey: ["job-basic-info"] }),
+                  ]);
+                  toast({
+                    title: "Refreshed",
+                    description: "Dashboard data has been refreshed.",
+                  });
                 }}
                 title="Refresh count"
               >
@@ -2866,7 +2925,7 @@ export default function Dashboard() {
 
         <Card
           className="shadow-md hover:shadow-lg transition-shadow duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none"
-          onClick={() => navigate("/jobs")}
+          onClick={() => navigate("/recruitment-hub")}
           onKeyDown={handleJobsCardKeyDown}
           role="button"
           tabIndex={0}
@@ -2886,7 +2945,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Button
           onClick={() => navigate("/shortlist")}
           className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
@@ -2929,6 +2988,21 @@ export default function Dashboard() {
           <div className="text-left">
             <p className="font-semibold text-base">Feedback</p>
             <p className="text-xs text-muted-foreground">Submit interview feedback</p>
+          </div>
+        </Button>
+
+        <Button
+          onClick={() => navigate("/document-verification")}
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          variant="outline"
+        >
+          <div className="flex items-center justify-between w-full">
+            <ShieldCheck className="h-6 w-6 text-primary" />
+            <span className="text-2xl font-bold">{documentVerificationCount || 0}</span>
+          </div>
+          <div className="text-left">
+            <p className="font-semibold text-base">CID Verification</p>
+            <p className="text-xs text-muted-foreground">Verify candidate documents</p>
           </div>
         </Button>
 
@@ -3267,26 +3341,27 @@ export default function Dashboard() {
                               </span>
                             </div>
                           ) : (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="self-start"
-                              disabled={requestResumeEmailMutation.isPending}
-                              onClick={() => requestResumeEmailMutation.mutate()}
-                            >
-                              {requestResumeEmailMutation.isPending ? (
-                                <>
-                                  <Mail className="h-4 w-4 mr-2 animate-pulse" />
-                                  Sending request...
-                                </>
-                              ) : (
-                                <>
-                                  <Mail className="h-4 w-4 mr-2" />
-                                  Request Resume Mail
-                                </>
-                              )}
-                            </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="self-start"
+                              disabled={requestResumeEmailMutation.isPending || !editForm.referenceSource}
+                          onClick={() => requestResumeEmailMutation.mutate()}
+                              title={!editForm.referenceSource ? "Please select a Reference Source first" : ""}
+                        >
+                          {requestResumeEmailMutation.isPending ? (
+                            <>
+                              <Mail className="h-4 w-4 mr-2 animate-pulse" />
+                              Sending request...
+                            </>
+                          ) : (
+                            <>
+                              <Mail className="h-4 w-4 mr-2" />
+                              Request Resume Mail
+                            </>
+                          )}
+                        </Button>
                           )}
                           <Button
                             type="button"
@@ -3435,6 +3510,23 @@ export default function Dashboard() {
                 onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
                 placeholder="Enter phone number"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-reference-source">Reference Source</Label>
+              <Select
+                value={editForm.referenceSource}
+                onValueChange={(value) => setEditForm({ ...editForm, referenceSource: value })}
+              >
+                <SelectTrigger id="edit-reference-source">
+                  <SelectValue placeholder="Select reference source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="linkedin">LinkedIn</SelectItem>
+                  <SelectItem value="internshala">Internshala</SelectItem>
+                  <SelectItem value="naukri">Naukri</SelectItem>
+                  <SelectItem value="friend_referral">Friend / Referral</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

@@ -21,9 +21,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Loader2, Edit, Trash2, Mail, Search, History } from "lucide-react";
+import { Loader2, Edit, Trash2, Mail, Search, History, MessageSquare } from "lucide-react";
 import { openResume } from "@/lib/resume";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
 const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
 
@@ -53,6 +54,18 @@ interface FeedbackFormData {
   finalDecision: "Approve" | "Reject";
 }
 
+interface EmailReply {
+  id: string;
+  candidate_id: string | null;
+  candidate_email: string;
+  candidate_name: string | null;
+  subject: string | null;
+  reply_content: string;
+  received_at: string;
+  status: string;
+  email_stage: string | null;
+}
+
 export default function Feedback() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -79,6 +92,8 @@ export default function Feedback() {
   const [searchTerm, setSearchTerm] = useState("");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
+  const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
   // Fetch candidates who have interview scheduled
   const { data: candidates = [], isLoading } = useQuery({
@@ -351,6 +366,32 @@ export default function Feedback() {
     setIsDialogOpen(true);
   };
 
+  // Fetch email replies for feedback stage
+  const { data: emailReplies = [] } = useQuery({
+    queryKey: ["email-replies-feedback"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("email_replies")
+        .select("*")
+        .eq("email_stage", "feedback")
+        .order("received_at", { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as EmailReply[];
+    },
+  });
+
+  const handleViewReplies = (candidate: Candidate) => {
+    setSelectedCandidateForReplies(candidate);
+    setRepliesDialogOpen(true);
+  };
+
+  const getCandidateReplies = (candidate: Candidate) => {
+    return emailReplies.filter(
+      (reply) => reply.candidate_email.toLowerCase() === candidate.email.toLowerCase()
+    );
+  };
+
   // Update feedback mutation
   const updateFeedbackMutation = useMutation({
     mutationFn: async (data: FeedbackFormData) => {
@@ -550,7 +591,7 @@ export default function Feedback() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
           <TabsTrigger value="pending" className="flex items-center gap-2">
             <Mail className="h-4 w-4" />
             Pending Feedback
@@ -558,6 +599,10 @@ export default function Feedback() {
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             History ({feedbackHistory.length})
+          </TabsTrigger>
+          <TabsTrigger value="replies" className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Replies
           </TabsTrigger>
         </TabsList>
 
@@ -600,6 +645,16 @@ export default function Feedback() {
                   candidate.resume_url && handleViewResume(candidate.resume_url)
                 }
               >
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleViewReplies(candidate)}
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Replies ({getCandidateReplies(candidate).length})
+                  </Button>
+                </div>
                 <Dialog
                   open={isDialogOpen && selectedCandidate?.id === candidate.id}
                   onOpenChange={setIsDialogOpen}
@@ -935,6 +990,52 @@ export default function Feedback() {
         )}
       </section>
         </TabsContent>
+
+        <TabsContent value="replies" className="space-y-6 mt-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium text-foreground">Feedback email replies</p>
+              <p className="text-xs text-muted-foreground">
+                View replies that candidates sent to documents / rejection emails.
+              </p>
+            </div>
+          </div>
+
+          {emailReplies.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
+              <p>No email replies received yet for feedback stage.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {emailReplies.map((reply) => (
+                <div
+                  key={reply.id}
+                  className="flex items-start justify-between rounded-md border px-3 py-2 text-sm bg-muted/30"
+                >
+                  <div className="flex-1 pr-4">
+                    <p className="font-medium text-foreground">
+                      {reply.candidate_name || reply.candidate_email}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {reply.subject || "No subject"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">
+                      {reply.reply_content}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-2xs">
+                      {reply.status}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(reply.received_at).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
 
       {/* Delete Confirmation Dialog */}
@@ -974,6 +1075,45 @@ export default function Feedback() {
                 "Delete"
               )}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Replies Dialog */}
+      <Dialog open={repliesDialogOpen} onOpenChange={setRepliesDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Replies from {selectedCandidateForReplies?.full_name || "Candidate"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedCandidateForReplies && getCandidateReplies(selectedCandidateForReplies).length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No email replies received yet from this candidate for feedback/documents stage.</p>
+              </div>
+            ) : (
+              selectedCandidateForReplies &&
+              getCandidateReplies(selectedCandidateForReplies).map((reply) => (
+                <div key={reply.id} className="border rounded-lg p-4 space-y-3 bg-card">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{reply.subject || "No Subject"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Received: {new Date(reply.received_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-xs">
+                      {reply.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm whitespace-pre-wrap border-t pt-3 text-muted-foreground bg-muted/30 p-3 rounded">
+                    {reply.reply_content.length > 500
+                      ? reply.reply_content.substring(0, 500) + "..."
+                      : reply.reply_content}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </DialogContent>
       </Dialog>

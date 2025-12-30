@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Mail, Search, History } from "lucide-react";
+import { Loader2, Mail, Search, History, MessageSquare } from "lucide-react";
 import { openResume } from "@/lib/resume";
 import {
   Dialog,
@@ -58,6 +58,18 @@ interface EmailHistoryEntry {
   created_at: string;
 }
 
+interface EmailReply {
+  id: string;
+  candidate_id: string | null;
+  candidate_email: string;
+  candidate_name: string | null;
+  subject: string | null;
+  reply_content: string;
+  received_at: string;
+  status: string;
+  email_stage: string | null;
+}
+
 export default function Shortlist() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -74,6 +86,8 @@ export default function Shortlist() {
   const [historyEntries, setHistoryEntries] = useState<EmailHistoryEntry[]>([]);
   const [historyCandidate, setHistoryCandidate] = useState<Candidate | null>(null);
   const [sentEmailIds, setSentEmailIds] = useState<string[]>([]);
+  const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
+  const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
   // Fetch candidates with job information
   const { data: candidates = [], isLoading } = useQuery({
@@ -438,6 +452,32 @@ export default function Shortlist() {
     await openResume(resumeUrl);
   };
 
+  // Fetch email replies for shortlist stage
+  const { data: emailReplies = [] } = useQuery({
+    queryKey: ["email-replies-shortlist"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("email_replies")
+        .select("*")
+        .eq("email_stage", "shortlist")
+        .order("received_at", { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as EmailReply[];
+    },
+  });
+
+  const handleViewReplies = (candidate: Candidate) => {
+    setSelectedCandidateForReplies(candidate);
+    setRepliesDialogOpen(true);
+  };
+
+  const getCandidateReplies = (candidate: Candidate) => {
+    return emailReplies.filter(
+      (reply) => reply.candidate_email.toLowerCase() === candidate.email.toLowerCase()
+    );
+  };
+
   // Fetch shortlist email history for all candidates
   const { data: shortlistHistory = [], isLoading: isShortlistHistoryLoading } = useQuery({
     queryKey: ["shortlist-email-history"],
@@ -513,23 +553,23 @@ export default function Shortlist() {
         </TabsList>
 
         <TabsContent value="shortlist" className="space-y-6 mt-6">
-          {/* Search Bar */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
-              Search Candidate
-            </p>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search by name, email, phone, or job title"
-                className="pl-9"
-              />
-            </div>
-          </div>
+      {/* Search Bar */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
+          Search Candidate
+        </p>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search by name, email, phone, or job title"
+            className="pl-9"
+          />
+        </div>
+      </div>
 
-          <div className="grid gap-6">
+      <div className="grid gap-6">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>{searchTerm ? "No candidates found matching your search." : "No candidates found. Upload resumes to see candidates here."}</p>
@@ -605,10 +645,10 @@ export default function Shortlist() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void handleViewShortlistHistory(candidate)}
+                    onClick={() => handleViewReplies(candidate)}
                   >
-                    <History className="h-4 w-4 mr-2" />
-                    History
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Replies ({getCandidateReplies(candidate).length})
                   </Button>
                   <Button
                     variant="secondary"
@@ -630,7 +670,7 @@ export default function Shortlist() {
             </CandidateCard>
           ))
         )}
-          </div>
+      </div>
         </TabsContent>
 
         <TabsContent value="history" className="space-y-6 mt-6">
@@ -736,6 +776,50 @@ export default function Shortlist() {
               ))}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Replies Dialog */}
+      <Dialog open={repliesDialogOpen} onOpenChange={setRepliesDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Replies from {selectedCandidateForReplies?.full_name || "Candidate"}</DialogTitle>
+            <DialogDescription>
+              {selectedCandidateForReplies
+                ? `Email replies received from ${selectedCandidateForReplies.full_name} (${selectedCandidateForReplies.email}) for shortlist stage.`
+                : "Email replies."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedCandidateForReplies && getCandidateReplies(selectedCandidateForReplies).length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No email replies received yet from this candidate.</p>
+              </div>
+            ) : (
+              selectedCandidateForReplies &&
+              getCandidateReplies(selectedCandidateForReplies).map((reply) => (
+                <div key={reply.id} className="border rounded-lg p-4 space-y-3 bg-card">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{reply.subject || "No Subject"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Received: {new Date(reply.received_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-xs">
+                      {reply.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm whitespace-pre-wrap border-t pt-3 text-muted-foreground bg-muted/30 p-3 rounded">
+                    {reply.reply_content.length > 500
+                      ? reply.reply_content.substring(0, 500) + "..."
+                      : reply.reply_content}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

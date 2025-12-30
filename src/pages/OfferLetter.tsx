@@ -21,7 +21,7 @@ import {
   DialogTrigger,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { FileText, Loader2, Download, Mail, Upload, History, ExternalLink, Search } from "lucide-react";
+import { FileText, Loader2, Download, Mail, Upload, History, ExternalLink, Search, MessageSquare } from "lucide-react";
 import { format } from "date-fns";
 import { openResume } from "@/lib/resume";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,6 +67,18 @@ interface OfferLetterData {
   managerName: string;
   joiningLocation: string;
   email: string;
+}
+
+interface EmailReply {
+  id: string;
+  candidate_id: string | null;
+  candidate_email: string;
+  candidate_name: string | null;
+  subject: string | null;
+  reply_content: string;
+  received_at: string;
+  status: string;
+  email_stage: string | null;
 }
 
 // Generate PDF content (simple HTML to PDF conversion)
@@ -275,6 +287,8 @@ export default function OfferLetter() {
   const [activeTab, setActiveTab] = useState("generate");
   const [searchTerm, setSearchTerm] = useState("");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
+  const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
   // Fetch only approved candidates
   const { data: candidates = [], isLoading } = useQuery({
@@ -459,26 +473,26 @@ export default function OfferLetter() {
       }
 
       if (!existingLogs || existingLogs.length === 0) {
-        const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
-          body: {
-            to: email,
-            candidateName: candidate.full_name,
-            emailType: "offer-letter-upload",
-            data: {
-              positionTitle: candidate.jobs?.job_title || "Intern",
-              attachment: {
-                filename: file.name,
-                content: fileBase64,
-                type: file.type || "application/pdf",
-              },
-              offer_letter_url: offerLetterUrl,
+      const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: email,
+          candidateName: candidate.full_name,
+          emailType: "offer-letter-upload",
+          data: {
+            positionTitle: candidate.jobs?.job_title || "Intern",
+            attachment: {
+              filename: file.name,
+              content: fileBase64,
+              type: file.type || "application/pdf",
             },
+            offer_letter_url: offerLetterUrl,
           },
-        });
+        },
+      });
 
-        if (emailError || !emailData?.success) {
-          console.warn("Email sending failed, but file uploaded:", emailError || emailData?.error);
-          // Don't throw - file is uploaded successfully
+      if (emailError || !emailData?.success) {
+        console.warn("Email sending failed, but file uploaded:", emailError || emailData?.error);
+        // Don't throw - file is uploaded successfully
         } else {
           emailSent = true;
           await supabase.from("activity_logs").insert({
@@ -562,6 +576,32 @@ export default function OfferLetter() {
   const handleFileSelect = (candidate: Candidate) => {
     setUploadCandidate(candidate);
     setIsUploadDialogOpen(true);
+  };
+
+  // Fetch email replies for offer-letter stage
+  const { data: emailReplies = [] } = useQuery({
+    queryKey: ["email-replies-offer"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("email_replies")
+        .select("*")
+        .eq("email_stage", "offer-letter")
+        .order("received_at", { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as EmailReply[];
+    },
+  });
+
+  const handleViewReplies = (candidate: Candidate) => {
+    setSelectedCandidateForReplies(candidate);
+    setRepliesDialogOpen(true);
+  };
+
+  const getCandidateReplies = (candidate: Candidate) => {
+    return emailReplies.filter(
+      (reply) => reply.candidate_email.toLowerCase() === candidate.email.toLowerCase()
+    );
   };
 
   const handleFileUpload = async (e: React.FormEvent) => {
@@ -773,7 +813,7 @@ export default function OfferLetter() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
           <TabsTrigger value="generate" className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
             Generate Offer Letter
@@ -781,6 +821,10 @@ export default function OfferLetter() {
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             History ({offerLettersHistory.length})
+          </TabsTrigger>
+          <TabsTrigger value="replies" className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Replies
           </TabsTrigger>
         </TabsList>
 
@@ -841,7 +885,15 @@ export default function OfferLetter() {
                   )}
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleViewReplies(candidate)}
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Replies ({getCandidateReplies(candidate).length})
+                </Button>
               <Dialog open={isDialogOpen && selectedCandidate?.id === candidate.id} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button onClick={() => handleOpenDialog(candidate)}>
@@ -1154,6 +1206,52 @@ export default function OfferLetter() {
         </CardContent>
       </Card>
         </TabsContent>
+
+        <TabsContent value="replies" className="space-y-6 mt-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium text-foreground">Offer letter email replies</p>
+              <p className="text-xs text-muted-foreground">
+                View replies that candidates sent to offer letter emails.
+              </p>
+            </div>
+          </div>
+
+          {emailReplies.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
+              <p>No email replies received yet for offer letters.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {emailReplies.map((reply) => (
+                <div
+                  key={reply.id}
+                  className="flex items-start justify-between rounded-md border px-3 py-2 text-sm bg-muted/30"
+                >
+                  <div className="flex-1 pr-4">
+                    <p className="font-medium text-foreground">
+                      {reply.candidate_name || reply.candidate_email}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {reply.subject || "No subject"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">
+                      {reply.reply_content}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-2xs">
+                      {reply.status}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(reply.received_at).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
 
       {/* Upload Offer Letter Dialog */}
@@ -1232,6 +1330,48 @@ export default function OfferLetter() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Replies Dialog */}
+      <Dialog open={repliesDialogOpen} onOpenChange={setRepliesDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Replies from {selectedCandidateForReplies?.full_name || "Candidate"}</DialogTitle>
+            <DialogDescription>
+              Email replies received for offer letter stage.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedCandidateForReplies && getCandidateReplies(selectedCandidateForReplies).length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No email replies received yet from this candidate for offer letter stage.</p>
+              </div>
+            ) : (
+              selectedCandidateForReplies &&
+              getCandidateReplies(selectedCandidateForReplies).map((reply) => (
+                <div key={reply.id} className="border rounded-lg p-4 space-y-3 bg-card">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{reply.subject || "No Subject"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Received: {new Date(reply.received_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-xs">
+                      {reply.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm whitespace-pre-wrap border-t pt-3 text-muted-foreground bg-muted/30 p-3 rounded">
+                    {reply.reply_content.length > 500
+                      ? reply.reply_content.substring(0, 500) + "..."
+                      : reply.reply_content}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

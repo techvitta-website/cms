@@ -44,28 +44,28 @@ export default function CandidateCard({
   return (
     <Card className="hover:shadow-lg transition-shadow">
       <CardContent className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1">
-            <h3 className="text-lg font-semibold text-foreground mb-1">
+        <div className="flex items-start justify-between mb-4 gap-4">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-lg font-semibold text-foreground mb-1 truncate">
               {fullName}
             </h3>
             <div className="space-y-1 text-sm text-muted-foreground">
-              <p>
+              <p className="truncate">
                 <span className="font-medium">Email:</span> {email}
               </p>
               {phone && (
-                <p>
+                <p className="truncate">
                   <span className="font-medium">Phone:</span> {phone}
                 </p>
               )}
               {appliedJob && (
-                <p>
+                <p className="truncate">
                   <span className="font-medium">Applied Job:</span> {appliedJob}
                 </p>
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
             {status && getStatusBadge(status)}
             {resumeUrl && (
               <Button

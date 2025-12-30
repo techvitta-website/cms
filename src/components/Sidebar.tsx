@@ -1,4 +1,4 @@
-import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award } from "lucide-react";
+import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award, ShieldCheck } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -6,11 +6,11 @@ export const menuItems = [
   { icon: Home, label: "Dashboard", path: "/dashboard" },
   // Resumes temporarily hidden
   // { icon: FileText, label: "Resumes", path: "/resumes" },
-  { icon: Briefcase, label: "Jobs", path: "/jobs" },
-  { icon: Brain, label: "Matching", path: "/matching" },
+  { icon: Briefcase, label: "Recruitment Hub", path: "/recruitment-hub" },
   { icon: ClipboardList, label: "Shortlist", path: "/shortlist" },
   { icon: Calendar, label: "Interview", path: "/interview" },
   { icon: MessageSquare, label: "Feedback", path: "/feedback" },
+  { icon: ShieldCheck, label: "CID Verification", path: "/document-verification" },
   { icon: FileCheck, label: "Offer Letter", path: "/offer-letter" },
   { icon: Award, label: "Experience Letter", path: "/experience-letter" },
   { icon: Users, label: "HR Users", path: "/hr-users" },

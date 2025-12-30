@@ -52,6 +52,7 @@ export type Database = {
           resume_processed: boolean | null
           skills: string[] | null
           status: string | null
+          reference_source: string | null
         }
         Insert: {
           created_at?: string | null
@@ -66,6 +67,7 @@ export type Database = {
           resume_processed?: boolean | null
           skills?: string[] | null
           status?: string | null
+          reference_source?: string | null
         }
         Update: {
           created_at?: string | null
@@ -80,6 +82,7 @@ export type Database = {
           resume_processed?: boolean | null
           skills?: string[] | null
           status?: string | null
+          reference_source?: string | null
         }
         Relationships: []
       }
