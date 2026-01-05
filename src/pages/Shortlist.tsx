@@ -643,14 +643,6 @@ export default function Shortlist() {
                     )}
                   </Button>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewReplies(candidate)}
-                  >
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Replies ({getCandidateReplies(candidate).length})
-                  </Button>
-                  <Button
                     variant="secondary"
                     size="sm"
                     disabled={savingCommentId === candidate.id}

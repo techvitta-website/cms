@@ -48,6 +48,7 @@ interface Candidate {
   feedback_notes?: string | null;
   feedback_decision?: "Approve" | "Reject" | null;
   feedback_submitted_at?: string | null;
+  document_verification_status?: string | null;
   jobs?: {
     job_title: string;
     department: string | null;
@@ -290,7 +291,7 @@ export default function OfferLetter() {
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
   const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
-  // Fetch only approved candidates
+  // Fetch only approved candidates with verified documents
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["approved-candidates"],
     queryFn: async () => {
@@ -308,12 +309,14 @@ export default function OfferLetter() {
           feedback_notes,
           feedback_decision,
           feedback_submitted_at,
+          document_verification_status,
           jobs (
             job_title,
             department
           )
         `)
         .eq("status", "Approved")
+        .eq("document_verification_status", "verified")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -822,10 +825,6 @@ export default function OfferLetter() {
             <History className="h-4 w-4" />
             History ({offerLettersHistory.length})
           </TabsTrigger>
-          <TabsTrigger value="replies" className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            Replies
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="generate" className="space-y-6 mt-6">
@@ -886,14 +885,6 @@ export default function OfferLetter() {
                 </div>
               )}
               <div className="flex gap-2 flex-wrap">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleViewReplies(candidate)}
-                >
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  Replies ({getCandidateReplies(candidate).length})
-                </Button>
               <Dialog open={isDialogOpen && selectedCandidate?.id === candidate.id} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button onClick={() => handleOpenDialog(candidate)}>
@@ -1207,51 +1198,6 @@ export default function OfferLetter() {
       </Card>
         </TabsContent>
 
-        <TabsContent value="replies" className="space-y-6 mt-6">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm font-medium text-foreground">Offer letter email replies</p>
-              <p className="text-xs text-muted-foreground">
-                View replies that candidates sent to offer letter emails.
-              </p>
-            </div>
-          </div>
-
-          {emailReplies.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
-              <p>No email replies received yet for offer letters.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {emailReplies.map((reply) => (
-                <div
-                  key={reply.id}
-                  className="flex items-start justify-between rounded-md border px-3 py-2 text-sm bg-muted/30"
-                >
-                  <div className="flex-1 pr-4">
-                    <p className="font-medium text-foreground">
-                      {reply.candidate_name || reply.candidate_email}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {reply.subject || "No subject"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {reply.reply_content}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-2xs">
-                      {reply.status}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(reply.received_at).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
       </Tabs>
 
       {/* Upload Offer Letter Dialog */}

@@ -55,30 +55,108 @@ export default function HRUsers() {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     
-    try {
-      const { error } = await supabase
-        .from('hr_users')
-        .insert({
-          name: formData.get('name') as string,
-          email: formData.get('email') as string,
-          password: formData.get('password') as string,
-          role: role,
-        });
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+    const selectedRole = role || 'hr';
 
-      if (error) throw error;
-
+    if (!name || !email || !password || !selectedRole) {
       toast({
-        title: "HR member added successfully!",
-        description: "The new team member has been added to the system",
+        title: "Validation Error",
+        description: "Please fill in all required fields.",
+        variant: "destructive",
       });
-      
+      return;
+    }
+
+    try {
+      // Step 1: Create user in Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: password,
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: {
+            name: name,
+            role: selectedRole,
+          }
+        }
+      });
+
+      if (authError) {
+        // If user already exists, try to sign in to get the user ID
+        if (authError.message.includes('already registered')) {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password: password,
+          });
+
+          if (signInError) {
+            throw new Error(`User exists but password is incorrect. ${authError.message}`);
+          }
+
+          // Use existing user
+          if (signInData.user) {
+            // Step 2: Create or update hr_users record
+            const { error: hrError } = await supabase
+              .from('hr_users')
+              .upsert({
+                id: signInData.user.id,
+                name: name.trim(),
+                email: email.trim().toLowerCase(),
+                role: selectedRole,
+                password: null, // Don't store password in plain text
+              }, {
+                onConflict: 'email'
+              });
+
+            if (hrError) throw hrError;
+
+            // Sign out after creating the record
+            await supabase.auth.signOut();
+
+            toast({
+              title: "HR member added successfully!",
+              description: "The new team member has been added to the system. They can now login.",
+            });
+          }
+        } else {
+          throw authError;
+        }
+      } else if (authData.user) {
+        // Step 2: Create hr_users record with auth user ID
+        const { error: hrError } = await supabase
+          .from('hr_users')
+          .insert({
+            id: authData.user.id,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            role: selectedRole,
+            password: null, // Don't store password in plain text
+          });
+
+        if (hrError) {
+          // If hr_users insert fails, try to clean up auth user
+          console.error('Failed to create hr_users record:', hrError);
+          throw new Error(`Failed to create HR user record: ${hrError.message}`);
+        }
+
+        toast({
+          title: "HR member added successfully!",
+          description: "The new team member has been added to the system. They will receive a confirmation email to activate their account.",
+        });
+      }
+
       queryClient.invalidateQueries({ queryKey: ['hr-users'] });
       setOpen(false);
       setRole("");
-    } catch (error) {
+      
+      // Reset form
+      (e.target as HTMLFormElement).reset();
+    } catch (error: any) {
       toast({
         title: "Error adding HR member",
-        description: error.message,
+        description: error.message || "Failed to add HR member. Please try again.",
         variant: "destructive",
       });
     }
@@ -112,17 +190,17 @@ export default function HRUsers() {
             <form onSubmit={handleAddUser} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
-                <Input id="name" placeholder="John Doe" required />
+                <Input id="name" name="name" placeholder="John Doe" required />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="john.doe@company.com" required />
+                <Input id="email" name="email" type="email" placeholder="john.doe@company.com" required />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" placeholder="••••••••" required />
+                <Input id="password" name="password" type="password" placeholder="••••••••" required minLength={6} />
               </div>
 
               <div className="space-y-2">

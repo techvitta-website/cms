@@ -884,14 +884,6 @@ export default function ExperienceLetter() {
               }
             >
               <div className="flex gap-2 flex-wrap">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleViewReplies(candidate)}
-                >
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  Replies ({getCandidateReplies(candidate).length})
-                </Button>
                 <Button 
                   onClick={() => handleEditClick(candidate)}
                   variant="outline"

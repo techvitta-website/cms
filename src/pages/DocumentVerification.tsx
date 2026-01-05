@@ -79,12 +79,14 @@ export default function DocumentVerification() {
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
 
-  // Fetch all approved candidates from Feedback page (refresh every 10 seconds)
-  // Show ALL candidates with feedback_decision = "Approve" (regardless of status)
+  // Fetch candidates for CID Verification:
+  // 1. Candidates with feedback_decision = "Approve" 
+  // 2. Candidates with status = "Interview Scheduled" (for testing)
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["approved-candidates-documents"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Fetch approved candidates
+      const { data: approvedData, error: approvedError } = await supabase
         .from("candidates")
         .select(`
           id,
@@ -105,11 +107,47 @@ export default function DocumentVerification() {
           )
         `)
         .eq("feedback_decision", "Approve")
-        .not("feedback_decision", "is", null)
-        .order("created_at", { ascending: false });
+        .not("feedback_decision", "is", null);
 
-      if (error) throw error;
-      return (data ?? []) as unknown as Candidate[];
+      if (approvedError) throw approvedError;
+
+      // Fetch Interview Scheduled candidates (for testing)
+      const { data: interviewScheduledData, error: interviewError } = await supabase
+        .from("candidates")
+        .select(`
+          id,
+          full_name,
+          email,
+          phone,
+          resume_url,
+          status,
+          job_id,
+          feedback_rating,
+          feedback_notes,
+          feedback_decision,
+          feedback_submitted_at,
+          document_verification_status,
+          created_at,
+          jobs (
+            job_title,
+            department
+          )
+        `)
+        .eq("status", "Interview Scheduled");
+
+      if (interviewError) throw interviewError;
+
+      // Combine and deduplicate by ID
+      const allCandidates = [...(approvedData || []), ...(interviewScheduledData || [])];
+      const uniqueCandidates = Array.from(
+        new Map(allCandidates.map(c => [c.id, c])).values()
+      );
+
+      return uniqueCandidates.sort((a: any, b: any) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA;
+      }) as unknown as Candidate[];
     },
     refetchInterval: 10000, // Refresh every 10 seconds to catch status updates
   });
@@ -132,6 +170,61 @@ export default function DocumentVerification() {
       return counts;
     },
     refetchInterval: 10000, // Refresh every 10 seconds to catch new document uploads
+  });
+
+  // Fetch upload links from activity logs for candidates with requested status
+  const { data: uploadLinks = {} } = useQuery({
+    queryKey: ["candidate-upload-links", candidates.length],
+    queryFn: async () => {
+      // Fetch activity logs
+      const { data: logsData, error: logsError } = await supabase
+        .from("activity_logs")
+        .select("details, created_at")
+        .eq("action", "CID_DOCUMENT_REQUEST_SENT")
+        .order("created_at", { ascending: false });
+
+      if (logsError) throw logsError;
+      
+      // Fetch all approved candidates to match emails
+      const { data: candidatesData, error: candidatesError } = await supabase
+        .from("candidates")
+        .select("id, email")
+        .eq("feedback_decision", "Approve")
+        .not("feedback_decision", "is", null);
+
+      if (candidatesError) throw candidatesError;
+      
+      const links: { [key: string]: string } = {};
+      const candidateEmailMap: { [key: string]: string } = {};
+      
+      // Create email to candidate ID mapping
+      (candidatesData || []).forEach((candidate: any) => {
+        candidateEmailMap[candidate.email.toLowerCase()] = candidate.id;
+      });
+      
+      // Extract links from activity logs
+      (logsData || []).forEach((log: any) => {
+        // Extract candidate email and link from details
+        // Format: "CID document request email sent to {name} ({email}) with link: {link}"
+        const linkMatch = log.details?.match(/with link: (https?:\/\/[^\s]+)/);
+        const emailMatch = log.details?.match(/\(([^)]+@[^)]+)\)/);
+        
+        if (linkMatch && emailMatch) {
+          const email = emailMatch[1].toLowerCase();
+          const link = linkMatch[1];
+          const candidateId = candidateEmailMap[email];
+          
+          // Only store the most recent link for each candidate
+          if (candidateId && !links[candidateId]) {
+            links[candidateId] = link;
+          }
+        }
+      });
+      
+      return links;
+    },
+    enabled: candidates.length > 0,
+    refetchInterval: 10000,
   });
 
   // Filter candidates based on document verification status
@@ -269,48 +362,64 @@ export default function DocumentVerification() {
     }
   };
 
-  const handleVerifyDocument = async (docId: string, status: 'verified' | 'rejected') => {
-    setVerifyingDocId(docId);
+  const handleVerifyAllDocuments = async () => {
+    if (!selectedCandidate) return;
+    
+    setVerifyingDocId('all');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const verifiedBy = user?.id || null;
 
+      // Get all pending documents
+      const pendingDocs = candidateDocuments.filter(doc => doc.verification_status === 'pending');
+      
+      if (pendingDocs.length === 0) {
+        toast({
+          title: "No Pending Documents",
+          description: "All documents have already been verified.",
+          variant: "default",
+        });
+        setVerifyingDocId(null);
+        return;
+      }
+
+      // Update all pending documents to verified
+      const docIds = pendingDocs.map(doc => doc.id);
       const { error } = await supabase
         .from('candidate_documents')
         .update({
-          verification_status: status,
+          verification_status: 'verified',
           verified_at: new Date().toISOString(),
           verified_by: verifiedBy,
         })
-        .eq('id', docId);
+        .in('id', docIds);
 
       if (error) throw error;
 
       // Update local state
       setCandidateDocuments(prev =>
         prev.map(doc =>
-          doc.id === docId
+          doc.verification_status === 'pending'
             ? {
                 ...doc,
-                verification_status: status,
+                verification_status: 'verified',
                 verified_at: new Date().toISOString(),
               }
             : doc
         )
       );
 
-      // Check if all documents are verified
+      // Check if all required documents are verified
       const updatedDocs = candidateDocuments.map(doc =>
-        doc.id === docId ? { ...doc, verification_status: status } : doc
+        doc.verification_status === 'pending' ? { ...doc, verification_status: 'verified' } : doc
       );
-      const allVerified = updatedDocs.every(doc => doc.verification_status === 'verified');
       const allRequiredDocs = updatedDocs.filter(doc => 
         ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
       );
       const allRequiredVerified = allRequiredDocs.length > 0 && 
         allRequiredDocs.every(doc => doc.verification_status === 'verified');
 
-      if (allRequiredVerified && selectedCandidate) {
+      if (allRequiredVerified) {
         // Update candidate status to verified
         await supabase
           .from('candidates')
@@ -322,13 +431,76 @@ export default function DocumentVerification() {
       }
 
       toast({
-        title: status === 'verified' ? "Document Verified" : "Document Rejected",
-        description: `Document has been marked as ${status}`,
+        title: "All Documents Verified",
+        description: `${pendingDocs.length} document(s) have been verified successfully.`,
       });
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to update document status",
+        description: error.message || "Failed to verify documents",
+        variant: "destructive",
+      });
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
+  const handleRejectAllDocuments = async () => {
+    if (!selectedCandidate) return;
+    
+    setVerifyingDocId('reject-all');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const verifiedBy = user?.id || null;
+
+      // Get all pending documents
+      const pendingDocs = candidateDocuments.filter(doc => doc.verification_status === 'pending');
+      
+      if (pendingDocs.length === 0) {
+        toast({
+          title: "No Pending Documents",
+          description: "All documents have already been processed.",
+          variant: "default",
+        });
+        setVerifyingDocId(null);
+        return;
+      }
+
+      // Update all pending documents to rejected
+      const docIds = pendingDocs.map(doc => doc.id);
+      const { error } = await supabase
+        .from('candidate_documents')
+        .update({
+          verification_status: 'rejected',
+          verified_at: new Date().toISOString(),
+          verified_by: verifiedBy,
+        })
+        .in('id', docIds);
+
+      if (error) throw error;
+
+      // Update local state
+      setCandidateDocuments(prev =>
+        prev.map(doc =>
+          doc.verification_status === 'pending'
+            ? {
+                ...doc,
+                verification_status: 'rejected',
+                verified_at: new Date().toISOString(),
+              }
+            : doc
+        )
+      );
+
+      toast({
+        title: "All Documents Rejected",
+        description: `${pendingDocs.length} document(s) have been rejected.`,
+        variant: "destructive",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject documents",
         variant: "destructive",
       });
     } finally {
@@ -339,16 +511,20 @@ export default function DocumentVerification() {
   // Send document request email mutation
   const sendDocumentRequestMutation = useMutation({
     mutationFn: async (candidate: Candidate) => {
-      // Prevent duplicate document request emails
-      const { data: existingLogs, error: historyError } = await supabase
-        .from("activity_logs")
-        .select("id")
-        .eq("action", "CID_DOCUMENT_REQUEST_SENT")
-        .ilike("details", `%${candidate.email}%`)
-        .limit(1);
+      // Allow resending - don't prevent duplicate emails (for testing purposes)
+      // Only check if this is the first time sending (not requested yet)
+      if (!candidate.document_verification_status || candidate.document_verification_status === "not_requested") {
+        const { data: existingLogs, error: historyError } = await supabase
+          .from("activity_logs")
+          .select("id")
+          .eq("action", "CID_DOCUMENT_REQUEST_SENT")
+          .ilike("details", `%${candidate.email}%`)
+          .limit(1);
 
-      if (!historyError && existingLogs && existingLogs.length > 0) {
-        throw new Error("Document request email has already been sent to this candidate.");
+        if (!historyError && existingLogs && existingLogs.length > 0) {
+          // Allow resending even if already sent - just log it
+          console.log("Resending document request email to:", candidate.email);
+        }
       }
 
       // Generate upload link using candidate ID (no token needed)
@@ -588,6 +764,34 @@ export default function DocumentVerification() {
                     </div>
                   )}
 
+                  {candidate.document_verification_status === "requested" && uploadLinks[candidate.id] && (
+                    <div className="mb-4 rounded-lg border-2 border-blue-200 bg-blue-50 p-4 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-blue-600" />
+                        <p className="text-sm font-semibold text-blue-900">Upload Link:</p>
+                      </div>
+                      <div className="flex items-center gap-2 p-2 bg-white border rounded-md">
+                        <Input
+                          value={uploadLinks[candidate.id]}
+                          readOnly
+                          className="flex-1 text-xs font-mono border-0 bg-transparent"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(uploadLinks[candidate.id]);
+                            toast({
+                              title: "Link Copied!",
+                              description: "Upload link has been copied to clipboard",
+                            });
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-sm font-medium whitespace-nowrap">Document Status:</span>
@@ -609,8 +813,27 @@ export default function DocumentVerification() {
                           Create Upload Link & Send Email
                         </Button>
                       )}
-                      {(candidate.document_verification_status === "submitted" ||
-                        candidate.document_verification_status === "requested") && (
+                      {candidate.document_verification_status === "requested" && (
+                        <>
+                          <Button
+                            onClick={() => handleSendDocumentRequest(candidate)}
+                            variant="outline"
+                            className="whitespace-nowrap"
+                          >
+                            <Mail className="h-4 w-4 mr-2" />
+                            Resend Link
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            onClick={() => handleViewDocuments(candidate)} 
+                            className="whitespace-nowrap"
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            View Documents ({documentCounts[candidate.id] || 0})
+                          </Button>
+                        </>
+                      )}
+                      {candidate.document_verification_status === "submitted" && (
                         <Button 
                           variant="outline" 
                           onClick={() => handleViewDocuments(candidate)} 
@@ -831,48 +1054,6 @@ export default function DocumentVerification() {
                           <Download className="h-4 w-4 mr-2" />
                           Download
                         </Button>
-                        {doc.verification_status === 'pending' && (
-                          <>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              className="bg-green-600 hover:bg-green-700 text-white flex-1 min-w-[120px]"
-                              onClick={() => handleVerifyDocument(doc.id, 'verified')}
-                              disabled={verifyingDocId === doc.id}
-                            >
-                              {verifyingDocId === doc.id ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  Verifying...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle className="h-4 w-4 mr-2" />
-                                  Verify
-                                </>
-                              )}
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              className="flex-1 min-w-[120px]"
-                              onClick={() => handleVerifyDocument(doc.id, 'rejected')}
-                              disabled={verifyingDocId === doc.id}
-                            >
-                              {verifyingDocId === doc.id ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  Processing...
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="h-4 w-4 mr-2" />
-                                  Reject
-                                </>
-                              )}
-                            </Button>
-                          </>
-                        )}
                       </div>
                       
                       {doc.verification_notes && (
@@ -885,6 +1066,50 @@ export default function DocumentVerification() {
                   </Card>
                 );
               })}
+              
+              {/* Verify All and Reject All Buttons */}
+              {candidateDocuments.some(doc => doc.verification_status === 'pending') && (
+                <div className="pt-4 border-t mt-4 space-y-2">
+                  <Button
+                    variant="default"
+                    size="lg"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                    onClick={handleVerifyAllDocuments}
+                    disabled={verifyingDocId !== null}
+                  >
+                    {verifyingDocId === 'all' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Verifying All Documents...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Verify All Documents
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="lg"
+                    className="w-full"
+                    onClick={handleRejectAllDocuments}
+                    disabled={verifyingDocId !== null}
+                  >
+                    {verifyingDocId === 'reject-all' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Rejecting All Documents...
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4 mr-2" />
+                        Reject All Documents
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
           

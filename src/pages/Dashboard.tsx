@@ -81,6 +81,11 @@ interface RawCandidate {
   resume_url: string | null;
   matches?: CandidateMatch[] | null;
   reference_source?: string | null;
+  referrer_name?: string | null;
+  is_archived?: boolean | null;
+  jobs?: {
+    job_title: string | null;
+  } | null;
 }
 
 interface CandidateRow {
@@ -94,6 +99,7 @@ interface CandidateRow {
   createdLabel: string | null;
   resumeUrl: string | null;
   referenceSource?: string | null;
+  referrerName?: string | null;
 }
 
 const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
@@ -117,6 +123,7 @@ export default function Dashboard() {
     email: "",
     phone: "",
     referenceSource: "",
+    referrerName: "",
   });
   const [addCandidateDialogOpen, setAddCandidateDialogOpen] = useState(false);
   const [newCandidateForm, setNewCandidateForm] = useState({
@@ -135,6 +142,8 @@ export default function Dashboard() {
   const [resumeRequestHistoryEntries, setResumeRequestHistoryEntries] = useState<any[]>([]);
   const [resumeRequestHistoryLoading, setResumeRequestHistoryLoading] = useState(false);
   const [lastResumeRequestSent, setLastResumeRequestSent] = useState<{ date: string; time: string } | null>(null);
+  const [archivedCandidatesDialogOpen, setArchivedCandidatesDialogOpen] = useState(false);
+  const [unarchivingCandidateId, setUnarchivingCandidateId] = useState<string | null>(null);
 
   const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
 
@@ -404,7 +413,36 @@ export default function Dashboard() {
       const seenIds = new Set<string>();
 
       while (hasMore) {
-        const { data, error } = await supabase
+        let query = supabase
+          .from('candidates')
+          .select(`
+            id,
+            full_name,
+            email,
+            phone,
+            status,
+            created_at,
+            job_id,
+            resume_url,
+            reference_source,
+            referrer_name,
+            is_archived,
+            matches (
+              match_score,
+              job_id
+            )
+          `);
+        
+        // Try to filter archived candidates, but handle gracefully if column doesn't exist
+        const { data, error } = await query
+          .or('is_archived.is.null,is_archived.eq.false')
+          .order('created_at', { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          // If error is about missing column, retry without filter and filter in JS
+          if (error.message?.includes('is_archived') || error.message?.includes('column') || error.message?.includes('schema cache')) {
+            const { data: retryData, error: retryError } = await supabase
           .from('candidates')
           .select(`
             id,
@@ -424,10 +462,31 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .range(from, from + pageSize - 1);
 
-        if (error) throw error;
+            if (retryError) throw retryError;
+            
+            // Filter in JavaScript (all candidates since column doesn't exist)
+            const filtered = retryData || [];
+            
+            if (filtered.length > 0) {
+              for (const candidate of filtered as RawCandidate[]) {
+                if (candidate.id && !seenIds.has(candidate.id)) {
+                  seenIds.add(candidate.id);
+                  allCandidates.push(candidate);
+                }
+              }
+              from += pageSize;
+              hasMore = filtered.length === pageSize;
+            } else {
+              hasMore = false;
+            }
+            continue;
+          }
+          throw error;
+        }
 
         if (data && data.length > 0) {
-          for (const candidate of data as RawCandidate[]) {
+          const candidates = (data || []) as unknown as RawCandidate[];
+          for (const candidate of candidates) {
             if (candidate.id && !seenIds.has(candidate.id)) {
               seenIds.add(candidate.id);
               allCandidates.push(candidate);
@@ -1205,6 +1264,7 @@ export default function Dashboard() {
         createdLabel,
         resumeUrl: candidate.resume_url,
         referenceSource: candidate.reference_source ?? null,
+        referrerName: candidate.referrer_name ?? null,
       };
     });
   }, [jobMap, latestCandidatesRaw]);
@@ -1442,6 +1502,7 @@ export default function Dashboard() {
       email: candidate.email === "—" ? "" : candidate.email,
       phone: candidate.phone === "—" ? "" : candidate.phone,
       referenceSource: candidate.referenceSource || "",
+      referrerName: candidate.referrerName || "",
     });
     setEditDialogOpen(true);
 
@@ -1608,339 +1669,223 @@ export default function Dashboard() {
     }
   };
 
+  // Fetch archived candidates
+  const { data: archivedCandidates = [], refetch: refetchArchived } = useQuery({
+    queryKey: ['archived-candidates'],
+    queryFn: async () => {
+      try {
+        // Fetch candidates without nested query to avoid type instantiation issues
+        // Using type assertion to avoid "Type instantiation is excessively deep" error
+        const baseQuery = supabase.from('candidates') as any;
+        const queryResult = await baseQuery
+          .select(`
+            id,
+            full_name,
+            email,
+            phone,
+            status,
+            created_at,
+            job_id,
+            resume_url,
+            reference_source
+          `)
+          .eq('is_archived', true)
+          .order('created_at', { ascending: false });
+        
+        const { data: candidatesData, error: candidatesError } = queryResult;
+
+        if (candidatesError) {
+          // If column doesn't exist, return empty array
+          if (candidatesError.message?.includes('is_archived') || candidatesError.message?.includes('column') || candidatesError.message?.includes('schema cache')) {
+            return [] as RawCandidate[];
+          }
+          throw candidatesError;
+        }
+
+        // Fetch jobs separately and map them
+        const candidates = (candidatesData || []) as unknown as RawCandidate[];
+        if (candidates.length > 0) {
+          const jobIds = candidates.map(c => c.job_id).filter(Boolean) as string[];
+          if (jobIds.length > 0) {
+            const { data: jobsData } = await supabase
+              .from('jobs')
+              .select('id, job_title')
+              .in('id', jobIds);
+            
+            const jobsMap = new Map((jobsData || []).map((j: any) => [j.id, j]));
+            
+            // Attach job info to candidates
+            candidates.forEach(candidate => {
+              if (candidate.job_id) {
+                const job = jobsMap.get(candidate.job_id);
+                if (job) {
+                  (candidate as any).jobs = { job_title: job.job_title };
+                }
+              }
+            });
+          }
+        }
+
+        return candidates;
+      } catch (error: any) {
+        // If column doesn't exist, return empty array
+        if (error.message?.includes('is_archived') || error.message?.includes('column') || error.message?.includes('schema cache')) {
+          return [] as RawCandidate[];
+        }
+        throw error;
+      }
+    },
+    enabled: archivedCandidatesDialogOpen,
+  });
+
+  // Unarchive candidate function
+  const handleUnarchive = async (candidateId: string) => {
+    setUnarchivingCandidateId(candidateId);
+    try {
+      const { error } = await supabase
+          .from("candidates")
+        .update({ is_archived: false } as any)
+        .eq("id", candidateId);
+
+      if (error) throw error;
+
+      // Invalidate queries to refresh both archived and main lists
+      await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+      await queryClient.invalidateQueries({ queryKey: ["archived-candidates"] });
+      await refetchCandidates();
+      await refetchArchived();
+
+      toast({
+        title: "Candidate Unarchived",
+        description: "Candidate has been restored to the dashboard.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to unarchive candidate.",
+        variant: "destructive",
+      });
+    } finally {
+      setUnarchivingCandidateId(null);
+    }
+  };
+
   const handleDeleteClick = async (candidate: CandidateRow) => {
-    console.log("Delete clicked for candidate:", candidate.id, candidate.name);
+    console.log("Archive clicked for candidate:", candidate.id, candidate.name);
     setDeleting(true);
 
     try {
-      let resumeUrlToDelete: string | null = null;
-      let resumeHashToDelete: string | null = null;
-      let bucket = '';
-      let path = '';
-      let fileDeleted = false;
-      let dbDeleted = false;
-      const bucketHints = new Set<string>();
-      let filenameFromSource: string | null = null;
-
-      if (candidate.id.startsWith('storage-')) {
-        console.log("Deleting storage-only candidate");
-        const withoutPrefix = candidate.id.replace('storage-', '');
-        for (const knownBucket of STORAGE_BUCKETS) {
-          const prefix = `${knownBucket}-`;
-          if (withoutPrefix.startsWith(prefix)) {
-            bucket = knownBucket;
-            path = withoutPrefix.substring(prefix.length);
-            bucketHints.add(knownBucket);
-            break;
-          }
-        }
-
-        if (!bucket || !path) {
-          const parsed = parseStorageLocation(candidate.resumeUrl);
-          if (parsed.bucket && parsed.path) {
-            bucket = parsed.bucket;
-            path = parsed.path;
-            bucketHints.add(parsed.bucket);
-          }
-          if (parsed.normalized) {
-            resumeUrlToDelete = parsed.normalized;
-          }
-          if (parsed.filename) {
-            filenameFromSource = parsed.filename;
-          }
-        } else {
-          resumeUrlToDelete = `${bucket}/${path}`;
-          filenameFromSource = path.split('/').pop() || path;
-        }
-
-        if (path || filenameFromSource) {
-          try {
-            const { data: hashData } = await supabase
-              .from("resume_upload_hashes")
-              .select("file_hash")
-              .ilike("original_name", `%${filenameFromSource || path}%`)
-              .maybeSingle();
-
-            if (hashData) {
-              resumeHashToDelete = hashData.file_hash;
-            }
-          } catch (hashError) {
-            console.warn("Error fetching hash:", hashError);
-          }
-        }
-      } else {
-        console.log("Deleting database candidate");
-        const { data: candidateData, error: fetchError } = await supabase
+      // Only archive database candidates (not storage-only candidates)
+      if (!candidate.id.startsWith('storage-')) {
+        console.log("Archiving database candidate");
+        
+        // Archive candidate instead of deleting
+        const { data: updateData, error: archiveError } = await supabase
           .from("candidates")
-          .select("resume_url, resume_hash")
+          .update({ is_archived: true } as any)
           .eq("id", candidate.id)
-          .maybeSingle();
+          .select();
 
-        if (fetchError) {
-          console.warn("Error fetching candidate data:", fetchError);
-        }
+        console.log("Archive update response:", { updateData, archiveError });
 
-        if (candidateData) {
-          const parsed = parseStorageLocation(candidateData.resume_url);
-          if (parsed.bucket && parsed.path) {
-            bucket = parsed.bucket;
-            path = parsed.path;
-            bucketHints.add(parsed.bucket);
+        if (archiveError) {
+          console.error("Database archive error:", archiveError);
+          console.error("Full error object:", JSON.stringify(archiveError, null, 2));
+          
+          // Check if column doesn't exist
+          if (archiveError.message?.includes('is_archived') || 
+              archiveError.message?.includes('column') || 
+              archiveError.message?.includes('schema cache') ||
+              archiveError.code === '42703') {
+            toast({
+              title: "Migration Required",
+              description: "Please run the database migration (015_add_is_archived_to_candidates.sql) in Supabase SQL Editor to enable archiving.",
+              variant: "destructive",
+            });
+            setDeleting(false);
+            return;
           }
-          if (parsed.filename) {
-            filenameFromSource = parsed.filename;
-          }
-          resumeUrlToDelete = parsed.normalized || candidateData.resume_url;
-          resumeHashToDelete = candidateData.resume_hash;
+          throw archiveError;
         }
-
-        const { error: deleteError } = await supabase
-          .from("candidates")
-          .delete()
-          .eq("id", candidate.id);
-
-        if (deleteError) {
-          console.error("Database delete error:", deleteError);
-          throw deleteError;
+        
+        if (!updateData || updateData.length === 0) {
+          console.warn("No rows were updated. Candidate ID:", candidate.id);
+          toast({
+            title: "Warning",
+            description: "Candidate not found or could not be updated. Please check if the candidate exists.",
+            variant: "destructive",
+          });
+          setDeleting(false);
+          return;
         }
-        dbDeleted = true;
-        console.log("Candidate deleted from database");
-
-        if (resumeHashToDelete) {
-          const { error: deleteHashError } = await supabase
-            .from("resume_upload_hashes")
-            .delete()
-            .eq("file_hash", resumeHashToDelete);
-
-          if (deleteHashError) {
-            console.warn("Error deleting hash:", deleteHashError.message);
-          }
-        }
-      }
-
-      if (resumeUrlToDelete && (!bucket || !path)) {
-        const parsed = parseStorageLocation(resumeUrlToDelete);
-        if (parsed.bucket && parsed.path) {
-          bucket = parsed.bucket;
-          path = parsed.path;
-          bucketHints.add(parsed.bucket);
-        }
-        if (parsed.filename) {
-          filenameFromSource = parsed.filename;
-        }
-      }
-
-      const pathVariantsSet = new Set<string>();
-      buildPathVariants(path, filenameFromSource).forEach((variant) => pathVariantsSet.add(variant));
-
-      if (resumeUrlToDelete && pathVariantsSet.size === 0) {
-        const fallbackParsed = parseStorageLocation(resumeUrlToDelete);
-        buildPathVariants(fallbackParsed.path, fallbackParsed.filename).forEach((variant) =>
-          pathVariantsSet.add(variant)
-        );
-      }
-
-      const pathVariants = Array.from(pathVariantsSet);
-      const bucketsToTry = bucketHints.size > 0 ? Array.from(bucketHints) : STORAGE_BUCKETS;
-
-      if (pathVariants.length > 0) {
-        try {
-          for (const bucketName of bucketsToTry) {
-            for (const candidatePath of pathVariants) {
-              if (!candidatePath) continue;
-              console.log(`Attempting to delete file: ${bucketName}/${candidatePath}`);
-              const { error: deleteError } = await supabase.storage
-                .from(bucketName)
-                .remove([candidatePath]);
-
-              if (deleteError) {
-                console.warn(`Deletion failed for ${bucketName}/${candidatePath}:`, deleteError.message);
-                continue;
-              }
-
-              bucket = bucketName;
-              path = candidatePath;
-              fileDeleted = true;
-              break;
-            }
-            if (fileDeleted) break;
-          }
-
-          if (!fileDeleted) {
-            const errorMessage = "Failed to delete resume file from storage.";
-            console.error(errorMessage);
-            if (candidate.id.startsWith('storage-')) {
-              throw new Error(errorMessage);
-            }
-          }
-        } catch (fileError: any) {
-          console.error("Error deleting resume file:", fileError);
-          if (candidate.id.startsWith('storage-')) {
-            throw fileError;
-          }
-        }
-      } else if (candidate.id.startsWith('storage-')) {
-        console.warn("Could not determine any storage path variants for deletion.");
-      }
-
-      if (fileDeleted && bucket && path) {
-        console.log(`✅ Successfully deleted file: ${bucket}/${path}`);
-
-        // Store deleted file identifiers in localStorage to prevent re-importing
-        try {
-          const stored = localStorage.getItem('deleted-resume-files');
-          const deletedSet = stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
-
-          // Store multiple identifiers to catch all variations
-          const filename = path.split('/').pop() || path;
-          deletedSet.add(`${bucket}/${path}`);
-          deletedSet.add(`${bucket}/${filename}`);
-          deletedSet.add(`${bucket}-${filename}`);
-          deletedSet.add(filename);
-          if (resumeUrlToDelete) {
-            deletedSet.add(resumeUrlToDelete);
-            const parsed = parseStorageLocation(resumeUrlToDelete);
-            if (parsed.normalized) deletedSet.add(parsed.normalized);
-            if (parsed.filename) deletedSet.add(parsed.filename);
-          }
-
-          // Limit to last 1000 deleted files to prevent localStorage from growing too large
-          const deletedArray = Array.from(deletedSet).slice(-1000);
-          localStorage.setItem('deleted-resume-files', JSON.stringify(deletedArray));
-          console.log(`✅ Stored deleted file identifiers in localStorage`);
-        } catch (storageError) {
-          console.warn("Could not store deleted file in localStorage:", storageError);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        try {
-          const { data: verifyFiles } = await supabase.storage
-            .from(bucket)
-            .list('', { limit: 10000 });
-
-          const stillExists = verifyFiles?.some((f) => f.name === path);
-          if (stillExists) {
-            console.warn(`⚠️ File ${path} still exists after deletion attempt`);
-          } else {
-            console.log(`✅ Verified: File ${path} no longer exists in ${bucket}`);
-          }
-        } catch (verifyError) {
-          console.warn("Could not verify file deletion:", verifyError);
-        }
-      }
-
-      // Delete hash from resume_upload_hashes for storage-only candidates
-      if (candidate.id.startsWith('storage-') && resumeHashToDelete) {
-        const { error: hashDeleteError } = await supabase
-          .from("resume_upload_hashes")
-          .delete()
-          .eq("file_hash", resumeHashToDelete);
-
-        if (hashDeleteError) {
-          console.warn("Error deleting hash:", hashDeleteError);
-        } else {
-          console.log("✅ Deleted hash from resume_upload_hashes");
-        }
-      }
-
-      // For storage-only candidates, ensure file was deleted
-      if (candidate.id.startsWith('storage-') && !fileDeleted && candidate.resumeUrl) {
-        throw new Error("Failed to delete storage file. Candidate will reappear on refresh.");
-      }
-
-      // Store deleted identifiers even if file deletion failed (for database candidates)
-      // This prevents the file from being re-imported if it still exists in storage
-      if (dbDeleted && (resumeUrlToDelete || candidate.resumeUrl)) {
-        try {
-          const stored = localStorage.getItem('deleted-resume-files');
-          const deletedSet = stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
-
-          const urlToUse = resumeUrlToDelete || candidate.resumeUrl || '';
-          if (urlToUse) {
-            const parsed = parseStorageLocation(urlToUse);
-            if (parsed.normalized) deletedSet.add(parsed.normalized);
-            if (parsed.filename) {
-              deletedSet.add(parsed.filename);
-              for (const bucketName of STORAGE_BUCKETS) {
-                deletedSet.add(`${bucketName}/${parsed.filename}`);
-                deletedSet.add(`${bucketName}-${parsed.filename}`);
-              }
-            }
-            deletedSet.add(urlToUse);
-          }
-
-          const deletedArray = Array.from(deletedSet).slice(-1000);
-          localStorage.setItem('deleted-resume-files', JSON.stringify(deletedArray));
-          console.log(`✅ Stored deleted candidate identifiers in localStorage`);
-        } catch (storageError) {
-          console.warn("Could not store deleted candidate in localStorage:", storageError);
-        }
-      }
-
-      console.log("Deletion operations completed, updating UI...");
+        
+        console.log("Candidate archived successfully:", updateData);
 
       // Update UI immediately by removing from cache (optimistic update)
-      // This ensures the candidate disappears from the UI instantly
       queryClient.setQueryData(['all-candidates-with-storage'], (oldData: RawCandidate[] | undefined) => {
         if (!oldData) return oldData;
-        const filtered = oldData.filter((c: RawCandidate) => {
-          // Remove by ID match
-          if (c.id === candidate.id) return false;
-          // Also remove if it's a storage candidate with same resumeUrl (to handle edge cases)
-          if (candidate.id.startsWith('storage-') && c.id.startsWith('storage-') && c.resume_url === candidate.resumeUrl) {
-            return false;
-          }
-          return true;
-        });
+          const filtered = oldData.filter((c: RawCandidate) => c.id !== candidate.id);
         console.log(`UI update: Removed candidate. Old count: ${oldData.length}, New count: ${filtered.length}`);
         return filtered;
       });
 
-      // Wait longer to ensure database/storage operations have fully propagated
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
       // Invalidate and refetch to ensure data consistency
-      // This ensures deleted candidates don't reappear on refresh
       await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+        await refetchCandidates();
 
-      try {
-        const refetchResult = await refetchCandidates();
-        console.log("Refetch completed:", refetchResult);
+        toast({
+          title: "Candidate Archived",
+          description: `${candidate.name} has been archived. You can unarchive them later if needed.`,
+        });
 
-        // After refetch, ensure deleted candidate is still not in the list
-        queryClient.setQueryData(['all-candidates-with-storage'], (currentData: RawCandidate[] | undefined) => {
-          if (!currentData) return currentData;
-          return currentData.filter((c: RawCandidate) => {
-            // Remove by ID match
+        console.log("✅ Archive operation completed successfully");
+      } else {
+        // For storage-only candidates, we can't archive them in the database
+        // They will reappear on refresh, but we can still remove them from the UI
+        queryClient.setQueryData(['all-candidates-with-storage'], (oldData: RawCandidate[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.filter((c: RawCandidate) => {
             if (c.id === candidate.id) return false;
-            // Also remove if it's a storage candidate with same resumeUrl
-            if (candidate.id.startsWith('storage-') && c.id.startsWith('storage-') && c.resume_url === candidate.resumeUrl) {
-              return false;
-            }
+            if (c.id.startsWith('storage-') && c.resume_url === candidate.resumeUrl) return false;
             return true;
           });
         });
-      } catch (refetchError) {
-        console.error("Refetch error:", refetchError);
-      }
-      toast({
-        title: "Candidate Deleted",
-        description: `${candidate.name} has been permanently deleted.`,
-      });
 
-      console.log("✅ Delete operation completed successfully - candidate will not reappear on refresh");
+      toast({
+          title: "Candidate Removed",
+          description: `${candidate.name} has been removed from view. Note: Storage-only candidates may reappear on refresh.`,
+      });
+      }
     } catch (error: any) {
-      console.error("Error deleting candidate:", error);
+      console.error("Error archiving candidate:", error);
+      console.error("Error details:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
 
       // Revert optimistic update on error
       await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
       await refetchCandidates();
 
+      // Check if it's a column missing error
+      if (error.message?.includes('is_archived') || 
+          error.message?.includes('column') || 
+          error.message?.includes('schema cache') ||
+          error.code === '42703') {
+        toast({
+          title: "Migration Required",
+          description: "Please run the database migration (015_add_is_archived_to_candidates.sql) in Supabase SQL Editor to enable archiving.",
+          variant: "destructive",
+        });
+      } else {
       toast({
         title: "Error",
-        description: error.message || "Failed to delete candidate. Please try again.",
+          description: error.message || "Failed to archive candidate. Please try again.",
         variant: "destructive",
       });
+      }
     } finally {
       setDeleting(false);
     }
@@ -2761,6 +2706,7 @@ export default function Dashboard() {
             status: 'Pending',
             resume_processed: false,
             reference_source: editForm.referenceSource || null,
+            referrer_name: editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null,
           })
           .select('id')
           .single();
@@ -2783,6 +2729,7 @@ export default function Dashboard() {
                   phone: editForm.phone.trim() || null,
                   resume_url: resumeUrl,
                   reference_source: editForm.referenceSource || null,
+                  referrer_name: editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null,
                 })
                 .eq('id', existing.id);
 
@@ -2806,6 +2753,8 @@ export default function Dashboard() {
           full_name?: string;
           email?: string;
           phone?: string;
+          reference_source?: string | null;
+          referrer_name?: string | null;
         } = {};
 
         updates.full_name = editForm.name.trim();
@@ -2815,6 +2764,8 @@ export default function Dashboard() {
         } else {
           updates.phone = null;
         }
+        updates.reference_source = editForm.referenceSource || null;
+        updates.referrer_name = editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null;
 
         const { error: updateError } = await supabase
           .from('candidates')
@@ -3184,13 +3135,14 @@ export default function Dashboard() {
                   <TableHead>Stage</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead className="text-right">Phone</TableHead>
+                  <TableHead>Referred By</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCandidates.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                       No candidates match the current filters.
                     </TableCell>
                   </TableRow>
@@ -3244,6 +3196,15 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell className="text-right text-sm text-foreground">
                         {candidate.phone}
+                      </TableCell>
+                      <TableCell>
+                        {candidate.referrerName ? (
+                          <Badge variant="secondary" className="bg-blue-50 text-blue-700">
+                            {candidate.referrerName}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -3309,14 +3270,14 @@ export default function Dashboard() {
           setLastResumeRequestSent(null);
         }
       }}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit Candidate Information</DialogTitle>
             <DialogDescription>
               Update candidate details. You can view the resume to verify the correct information.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
             <div className="flex items-center justify-between">
               <Label htmlFor="resume-view" className="text-sm font-medium">
                 Resume
@@ -3524,7 +3485,14 @@ export default function Dashboard() {
               <Label htmlFor="edit-reference-source">Reference Source</Label>
               <Select
                 value={editForm.referenceSource}
-                onValueChange={(value) => setEditForm({ ...editForm, referenceSource: value })}
+                onValueChange={(value) => {
+                  setEditForm({ 
+                    ...editForm, 
+                    referenceSource: value,
+                    // Clear referrer name if not friend/referral
+                    referrerName: value === "friend_referral" ? editForm.referrerName : ""
+                  });
+                }}
               >
                 <SelectTrigger id="edit-reference-source">
                   <SelectValue placeholder="Select reference source" />
@@ -3537,6 +3505,20 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
             </div>
+            {editForm.referenceSource === "friend_referral" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-referrer-name">Referrer Name</Label>
+                <Input
+                  id="edit-referrer-name"
+                  value={editForm.referrerName}
+                  onChange={(e) => setEditForm({ ...editForm, referrerName: e.target.value })}
+                  placeholder="Enter referrer's name"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the name of the person who referred this candidate
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -3802,6 +3784,82 @@ export default function Dashboard() {
               {uploadingResumes
                 ? `Uploading... (${uploadProgress.current}/${uploadProgress.total})`
                 : `Upload ${selectedResumeFiles.length} Resume(s)`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Archived Candidates Dialog */}
+      <Dialog open={archivedCandidatesDialogOpen} onOpenChange={setArchivedCandidatesDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Archived Candidates</DialogTitle>
+            <DialogDescription>
+              View and restore archived candidates. Unarchive a candidate to restore them to the dashboard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {archivedCandidates.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <FileX className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No archived candidates found.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Job Applied</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {archivedCandidates.map((candidate) => (
+                    <TableRow key={candidate.id}>
+                      <TableCell className="font-medium">{candidate.full_name}</TableCell>
+                      <TableCell>{candidate.email}</TableCell>
+                      <TableCell>{candidate.phone || "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{candidate.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {(candidate.jobs as any)?.job_title || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUnarchive(candidate.id)}
+                          disabled={unarchivingCandidateId === candidate.id}
+                        >
+                          {unarchivingCandidateId === candidate.id ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Unarchiving...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Unarchive
+                            </>
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setArchivedCandidatesDialogOpen(false)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

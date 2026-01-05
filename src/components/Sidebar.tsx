@@ -1,4 +1,4 @@
-import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award, ShieldCheck } from "lucide-react";
+import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award, ShieldCheck, Archive } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +14,7 @@ export const menuItems = [
   { icon: FileCheck, label: "Offer Letter", path: "/offer-letter" },
   { icon: Award, label: "Experience Letter", path: "/experience-letter" },
   { icon: Users, label: "HR Users", path: "/hr-users" },
+  { icon: Archive, label: "Archived Candidates", path: "/archived-candidates" },
   // Logs temporarily hidden
   // { icon: ScrollText, label: "Logs", path: "/logs" },
 ];

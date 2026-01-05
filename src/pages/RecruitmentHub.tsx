@@ -269,6 +269,8 @@ export default function RecruitmentHub() {
     skills: "",
   });
   const [editSaving, setEditSaving] = useState(false);
+  const [candidateStatuses, setCandidateStatuses] = useState<Record<string, string>>({});
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -895,6 +897,199 @@ export default function RecruitmentHub() {
     }
   };
 
+  // Fetch candidate statuses for existing candidates
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      const candidateIds = localResults
+        .map(r => r.candidateId)
+        .filter((id): id is string => id !== null);
+      
+      if (candidateIds.length === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('candidates')
+          .select('id, status')
+          .in('id', candidateIds);
+
+        if (error) throw error;
+
+        const statusMap: Record<string, string> = {};
+        (data || []).forEach((c: any) => {
+          statusMap[c.id] = c.status || 'Pending';
+        });
+
+        setCandidateStatuses(statusMap);
+      } catch (err) {
+        console.warn('Failed to fetch candidate statuses:', err);
+      }
+    };
+
+    if (localResults.length > 0) {
+      fetchStatuses();
+    }
+  }, [localResults]);
+
+  const formatStatus = (status: string) => {
+    if (!status) return "Pending";
+    return status
+      .toLowerCase()
+      .replace(/_/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getStatusBadgeClass = (status: string) => {
+    const key = status.toLowerCase();
+    if (key.includes("interview")) return "bg-amber-100 text-amber-700 border-none";
+    if (key.includes("shortlist")) return "bg-blue-100 text-blue-700 border-none";
+    if (key.includes("approve")) return "bg-emerald-100 text-emerald-700 border-none";
+    if (key.includes("reject")) return "bg-rose-100 text-rose-700 border-none";
+    return "bg-slate-100 text-slate-700 border-none";
+  };
+
+  const handleStatusUpdate = async (result: LocalResult, newStatus: string) => {
+    const statusKey = result.candidateId || result.source;
+    setUpdatingStatusId(statusKey);
+    
+    try {
+      let candidateId: string | null = result.candidateId ?? null;
+      
+      // Check for existing candidate by email if not found by ID
+      if (!candidateId && result.email) {
+        const { data: existing } = await supabase
+          .from('candidates')
+          .select('id')
+          .ilike('email', result.email)
+          .maybeSingle();
+        
+        if (existing) {
+          candidateId = existing.id;
+        }
+      }
+
+      // If candidate doesn't exist, create it
+      if (!candidateId) {
+        const normalizedSource = normalizeResumePath(result.source) || result.source;
+        
+        const { data: newCandidate, error: createError } = await supabase
+          .from('candidates')
+          .insert({
+            full_name: result.name,
+            email: result.email || `noemail+${Date.now()}@example.com`,
+            phone: result.phone,
+            skills: result.skills,
+            status: newStatus,
+            resume_url: normalizedSource,
+            job_id: selectedJob || null,
+          })
+          .select('id')
+          .single();
+
+        if (createError) throw createError;
+        candidateId = newCandidate.id;
+
+        // Update local results
+        setLocalResults((prev) =>
+          prev.map((item) =>
+            item.source === result.source ? { ...item, candidateId } : item
+          )
+        );
+      } else {
+        // Update existing candidate
+        const normalizedSource = normalizeResumePath(result.source) || result.source;
+        const { error: updateError } = await supabase
+          .from('candidates')
+          .update({
+            status: newStatus,
+            full_name: result.name,
+            phone: result.phone,
+            skills: result.skills,
+            job_id: selectedJob || null,
+            resume_url: normalizedSource,
+          })
+          .eq('id', candidateId);
+
+        if (updateError) throw updateError;
+      }
+
+      // Update local status state
+      if (candidateId) {
+        setCandidateStatuses((prev) => ({
+          ...prev,
+          [candidateId!]: newStatus,
+        }));
+      }
+
+      // Log to shortlist_records if status is Shortlisted
+      if (newStatus === 'Shortlisted') {
+        const jobRecord = jobs.find((job: any) => job.id === selectedJob);
+        const jobTitleSnapshot = jobRecord?.job_title ?? null;
+
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          const shortlistedBy = authData?.user?.id ?? null;
+          const normalizedResumeUrl = normalizeResumePath(result.source) || result.source;
+          await supabase.from('shortlist_records').insert({
+            candidate_snapname: result.name,
+            candidate_snapemail: result.email,
+            candidate_snapphone: result.phone,
+            resume_url: normalizedResumeUrl,
+            candidate_id: candidateId ?? null,
+            job_id: selectedJob || null,
+            job_snaptitle: jobTitleSnapshot,
+            shortlisted_by: shortlistedBy,
+            status: 'Shortlisted',
+          });
+        } catch (err) {
+          console.warn('Failed to log shortlist record', err);
+        }
+      }
+
+      // Log to activity_logs
+      const statusAction = newStatus === 'Shortlisted' ? 'shortlisted' : 
+                          newStatus === 'Rejected' ? 'rejected' : 
+                          `status updated to ${newStatus.toLowerCase()}`;
+      
+      const { error: logError } = await supabase.from('activity_logs').insert({
+        action: 'STATUS_UPDATED',
+        details: `${result.name} has been ${statusAction}`,
+      });
+
+      if (logError) console.warn('Failed to log activity:', logError);
+
+      toast({
+        title: "Status Updated",
+        description: `Candidate status updated to ${newStatus}.`,
+      });
+
+      // Invalidate queries to refresh dashboard and other pages
+      await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+      await queryClient.invalidateQueries({ queryKey: ['shortlist-candidates'] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs-count'] });
+      
+      // Refetch to ensure fresh data
+      await queryClient.refetchQueries({ queryKey: ["all-candidates-with-storage"] });
+      
+      // If shortlisted, navigate to shortlist page after a delay
+      if (newStatus === 'Shortlisted') {
+        setTimeout(() => {
+          navigate('/shortlist');
+        }, 1000);
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to update candidate status.",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingStatusId(null);
+    }
+  };
+
   const handleReject = async (result: LocalResult) => {
     const processingKey = `${result.source}-reject`;
     setProcessingStatus(processingKey);
@@ -1182,6 +1377,7 @@ export default function RecruitmentHub() {
                     <TableHead>Phone</TableHead>
                     <TableHead>Skills</TableHead>
                     <TableHead>Matched</TableHead>
+                    <TableHead>Stage</TableHead>
                     <TableHead>View/Download</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -1190,7 +1386,10 @@ export default function RecruitmentHub() {
                   {localResults.map((r, i) => {
                     const processingKey = `${r.source}-shortlist`;
                     const rejectKey = `${r.source}-reject`;
+                    const statusKey = r.candidateId || r.source;
                     const isProcessing = processingStatus === processingKey || processingStatus === rejectKey;
+                    const currentStatus = candidateStatuses[r.candidateId || ''] || 'Pending';
+                    const isUpdatingStatus = updatingStatusId === statusKey;
                     
                     return (
                       <TableRow key={`${r.source}-${i}`}>
@@ -1199,6 +1398,28 @@ export default function RecruitmentHub() {
                         <TableCell className="text-sm">{r.phone || '—'}</TableCell>
                         <TableCell className="text-sm">{r.skills.slice(0, 20).join(', ') || '—'}</TableCell>
                         <TableCell className="text-sm">{r.matched.join(', ')}</TableCell>
+                        <TableCell>
+                          <Select
+                            value={currentStatus}
+                            onValueChange={(value) => handleStatusUpdate(r, value)}
+                            disabled={isUpdatingStatus}
+                          >
+                            <SelectTrigger className="w-[150px] h-8 text-xs font-medium">
+                              <SelectValue>
+                                <Badge className={`capitalize ${getStatusBadgeClass(currentStatus)}`}>
+                                  {formatStatus(currentStatus)}
+                                </Badge>
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Pending">Pending</SelectItem>
+                              <SelectItem value="Shortlisted">Shortlisted</SelectItem>
+                              <SelectItem value="Rejected">Rejected</SelectItem>
+                              <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
+                              <SelectItem value="Approved">Approved</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-2">
                             <Button
@@ -1222,56 +1443,16 @@ export default function RecruitmentHub() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openEditDialogMatch(r, i)}
-                              className="w-full"
-                              disabled={isProcessing}
-                            >
-                              <Edit className="h-3 w-3 mr-1" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleShortlist(r)}
-                              disabled={isProcessing}
-                              className="w-full bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              {processingStatus === processingKey ? (
-                                <>
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  Processing...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Shortlist
-                                </>
-                              )}
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleReject(r)}
-                              disabled={isProcessing}
-                              className="w-full"
-                            >
-                              {processingStatus === rejectKey ? (
-                                <>
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  Processing...
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="h-3 w-3 mr-1" />
-                                  Reject
-                                </>
-                              )}
-                            </Button>
-                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditDialogMatch(r, i)}
+                            className="w-full"
+                            disabled={isProcessing || isUpdatingStatus}
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );

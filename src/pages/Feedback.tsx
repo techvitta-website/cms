@@ -600,10 +600,6 @@ export default function Feedback() {
             <History className="h-4 w-4" />
             History ({feedbackHistory.length})
           </TabsTrigger>
-          <TabsTrigger value="replies" className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            Replies
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending" className="space-y-6 mt-6">
@@ -646,14 +642,6 @@ export default function Feedback() {
                 }
               >
                 <div className="flex gap-2 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewReplies(candidate)}
-                  >
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Replies ({getCandidateReplies(candidate).length})
-                  </Button>
                 </div>
                 <Dialog
                   open={isDialogOpen && selectedCandidate?.id === candidate.id}
@@ -710,37 +698,37 @@ export default function Feedback() {
                       </div>
 
                       <div className="flex justify-end gap-2 pt-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            if (selectedCandidate) {
-                              handleSendEmail(selectedCandidate);
+                        {formData.finalDecision === "Reject" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              if (selectedCandidate) {
+                                handleSendEmail(selectedCandidate);
+                              }
+                            }}
+                            disabled={
+                              !selectedCandidate ||
+                              sendingDocumentsEmail === selectedCandidate.id ||
+                              sendDocumentsEmailMutation.isPending ||
+                              sendRejectionEmailMutation.isPending
                             }
-                          }}
-                          disabled={
-                            !selectedCandidate ||
-                            sendingDocumentsEmail === selectedCandidate.id ||
+                          >
+                            {sendingDocumentsEmail === selectedCandidate?.id ||
                             sendDocumentsEmailMutation.isPending ||
-                            sendRejectionEmailMutation.isPending
-                          }
-                        >
-                          {sendingDocumentsEmail === selectedCandidate?.id ||
-                          sendDocumentsEmailMutation.isPending ||
-                          sendRejectionEmailMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Sending...
-                            </>
-                          ) : (
-                            <>
-                              <Mail className="mr-2 h-4 w-4" />
-                              {formData.finalDecision === "Reject" 
-                                ? "Send Rejection Mail" 
-                                : "Documents sending mail"}
-                            </>
-                          )}
-                        </Button>
+                            sendRejectionEmailMutation.isPending ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              <>
+                                <Mail className="mr-2 h-4 w-4" />
+                                Send Rejection Mail
+                              </>
+                            )}
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           variant="outline"
@@ -991,51 +979,6 @@ export default function Feedback() {
       </section>
         </TabsContent>
 
-        <TabsContent value="replies" className="space-y-6 mt-6">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm font-medium text-foreground">Feedback email replies</p>
-              <p className="text-xs text-muted-foreground">
-                View replies that candidates sent to documents / rejection emails.
-              </p>
-            </div>
-          </div>
-
-          {emailReplies.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
-              <p>No email replies received yet for feedback stage.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {emailReplies.map((reply) => (
-                <div
-                  key={reply.id}
-                  className="flex items-start justify-between rounded-md border px-3 py-2 text-sm bg-muted/30"
-                >
-                  <div className="flex-1 pr-4">
-                    <p className="font-medium text-foreground">
-                      {reply.candidate_name || reply.candidate_email}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {reply.subject || "No subject"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {reply.reply_content}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-2xs">
-                      {reply.status}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(reply.received_at).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
       </Tabs>
 
       {/* Delete Confirmation Dialog */}

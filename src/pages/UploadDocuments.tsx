@@ -82,13 +82,13 @@ const DOCUMENT_TYPES: DocumentConfig[] = [
     id: "professional_certificates",
     label: "Professional / Course Certificates (If Any)",
     required: false,
-    allowMultiple: true,
+    allowMultiple: false,
   },
   {
     id: "previous_employment",
     label: "Previously offer letters & Relieving letters, internship certificates (If Any)",
     required: false,
-    allowMultiple: true,
+    allowMultiple: false,
   },
 ];
 
@@ -231,6 +231,36 @@ export default function UploadDocuments() {
   const handleFileSelect = (docType: string, newFiles: FileList | null, subKey?: string) => {
     if (!newFiles || newFiles.length === 0) return;
 
+    const key = subKey ? `${docType}_${subKey}` : docType;
+    const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
+    
+    // Check if document already uploaded and multiple not allowed
+    if (docConfig && "allowMultiple" in docConfig && !docConfig.allowMultiple) {
+      const uploaded = uploadedDocs[docType];
+      if (subKey) {
+        // For ID proof sub-types (aadhar/pan)
+        const subTypeUploaded = uploaded?.some((d) => d.subType === subKey);
+        if (subTypeUploaded) {
+          toast({
+            title: "Limit Reached",
+            description: `${docConfig.label} - ${subKey === "aadhar" ? "Aadhar Card" : "PAN Card"} has already been uploaded. Only one file is allowed.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      } else {
+        // For other single upload documents
+        if (uploaded && uploaded.length > 0) {
+          toast({
+            title: "Limit Reached",
+            description: `${docConfig.label} has already been uploaded. Only one file is allowed.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+    }
+
     const filesArray = Array.from(newFiles);
 
     // Check if all files are PDFs
@@ -260,9 +290,6 @@ export default function UploadDocuments() {
     });
 
     if (validFiles.length === 0) return;
-
-    const key = subKey ? `${docType}_${subKey}` : docType;
-    const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
 
     if (
       docConfig &&
@@ -505,10 +532,6 @@ export default function UploadDocuments() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-2">
-
-                  </div>
-
-                  <div className="space-y-2">
                     <Label className="text-muted-foreground">Full Name</Label>
                     <div className="p-3 bg-muted rounded-md font-semibold">
                       {candidateData.full_name}
@@ -627,6 +650,7 @@ export default function UploadDocuments() {
                           const uploaded = uploadedDocs[docType.id]?.filter(
                             (d) => d.subType === field.key
                           );
+                          const isAlreadyUploaded = uploaded && uploaded.length > 0;
 
                           return (
                             <div key={field.key} className="space-y-3 pl-4 border-l-2">
@@ -654,6 +678,7 @@ export default function UploadDocuments() {
                                 </div>
                               )}
 
+
                               <div className="flex gap-2">
                                 <Input
                                   type="file"
@@ -661,12 +686,13 @@ export default function UploadDocuments() {
                                   onChange={(e) =>
                                     handleFileSelect(docType.id, e.target.files, field.key)
                                   }
-                                  disabled={uploading[key]}
+                                  disabled={uploading[key] || isAlreadyUploaded}
                                   className="flex-1"
+                                  title={isAlreadyUploaded ? "Limit reached - File already uploaded" : ""}
                                 />
                                 <Button
                                   onClick={() => handleUpload(docType.id, field.key)}
-                                  disabled={!files[key] || files[key].length === 0 || uploading[key]}
+                                  disabled={!files[key] || files[key].length === 0 || uploading[key] || isAlreadyUploaded}
                                   className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
                                 >
                                   {uploading[key] ? (
@@ -697,6 +723,7 @@ export default function UploadDocuments() {
                 // Handle other document types
                 const uploaded = uploadedDocs[docType.id];
                 const allowMultiple = "allowMultiple" in docType && docType.allowMultiple;
+                const isAlreadyUploaded = uploaded && uploaded.length > 0 && !allowMultiple;
 
                 return (
                   <Card key={docType.id} className="border-2">
@@ -738,15 +765,17 @@ export default function UploadDocuments() {
                           accept={ACCEPTED_FILE_TYPES}
                           multiple={allowMultiple}
                           onChange={(e) => handleFileSelect(docType.id, e.target.files)}
-                          disabled={uploading[docType.id]}
+                          disabled={uploading[docType.id] || isAlreadyUploaded}
                           className="flex-1"
+                          title={isAlreadyUploaded ? "Limit reached - File already uploaded" : ""}
                         />
                         <Button
                           onClick={() => handleUpload(docType.id)}
                           disabled={
                             !files[docType.id] ||
                             files[docType.id].length === 0 ||
-                            uploading[docType.id]
+                            uploading[docType.id] ||
+                            isAlreadyUploaded
                           }
                           className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
                         >

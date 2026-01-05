@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Resumes from "./pages/Resumes";
 import RecruitmentHub from "./pages/RecruitmentHub";
 import HRUsers from "./pages/HRUsers";
+import ArchivedCandidates from "./pages/ArchivedCandidates";
 import Logs from "./pages/Logs";
 import Shortlist from "./pages/Shortlist";
 import Interview from "./pages/Interview";
@@ -129,6 +130,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Layout>
                     <HRUsers />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/archived-candidates"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <ArchivedCandidates />
                   </Layout>
                 </ProtectedRoute>
               }
