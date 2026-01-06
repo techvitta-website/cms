@@ -16,3 +16,4 @@ USING (true);
 -- Note: We allow reading all documents because candidates access via their candidate_id
 -- which is in the URL, and the application filters by candidate_id
 
+

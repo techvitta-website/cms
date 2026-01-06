@@ -77,6 +77,7 @@ export default function DocumentVerification() {
   const [candidateDocuments, setCandidateDocuments] = useState<CandidateDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+  const [rejectingDocId, setRejectingDocId] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
 
   // Fetch candidates for CID Verification:
@@ -505,6 +506,124 @@ export default function DocumentVerification() {
       });
     } finally {
       setVerifyingDocId(null);
+    }
+  };
+
+  const handleVerifyDocument = async (docId: string) => {
+    if (!selectedCandidate) return;
+    
+    setVerifyingDocId(docId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const verifiedBy = user?.id || null;
+
+      // Update document to verified
+      const { error } = await supabase
+        .from('candidate_documents')
+        .update({
+          verification_status: 'verified',
+          verified_at: new Date().toISOString(),
+          verified_by: verifiedBy,
+        })
+        .eq('id', docId);
+
+      if (error) throw error;
+
+      // Update local state
+      setCandidateDocuments(prev =>
+        prev.map(doc =>
+          doc.id === docId
+            ? {
+                ...doc,
+                verification_status: 'verified',
+                verified_at: new Date().toISOString(),
+              }
+            : doc
+        )
+      );
+
+      // Check if all required documents are verified
+      const updatedDocs = candidateDocuments.map(doc =>
+        doc.id === docId ? { ...doc, verification_status: 'verified' } : doc
+      );
+      const allRequiredDocs = updatedDocs.filter(doc => 
+        ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
+      );
+      const allRequiredVerified = allRequiredDocs.length > 0 && 
+        allRequiredDocs.every(doc => doc.verification_status === 'verified');
+
+      if (allRequiredVerified) {
+        // Update candidate status to verified
+        await supabase
+          .from('candidates')
+          .update({ document_verification_status: 'verified' })
+          .eq('id', selectedCandidate.id);
+        
+        queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
+        queryClient.invalidateQueries({ queryKey: ["candidate-document-counts"] });
+      }
+
+      toast({
+        title: "Document Verified",
+        description: "Document has been verified successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to verify document",
+        variant: "destructive",
+      });
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
+  const handleRejectDocument = async (docId: string) => {
+    if (!selectedCandidate) return;
+    
+    setRejectingDocId(docId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const verifiedBy = user?.id || null;
+
+      // Update document to rejected
+      const { error } = await supabase
+        .from('candidate_documents')
+        .update({
+          verification_status: 'rejected',
+          verified_at: new Date().toISOString(),
+          verified_by: verifiedBy,
+        })
+        .eq('id', docId);
+
+      if (error) throw error;
+
+      // Update local state
+      setCandidateDocuments(prev =>
+        prev.map(doc =>
+          doc.id === docId
+            ? {
+                ...doc,
+                verification_status: 'rejected',
+                verified_at: new Date().toISOString(),
+              }
+            : doc
+        )
+      );
+
+      toast({
+        title: "Document Rejected",
+        description: "Document has been rejected.",
+        variant: "destructive",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject document",
+        variant: "destructive",
+      });
+    } finally {
+      setRejectingDocId(null);
     }
   };
 
@@ -1062,54 +1181,54 @@ export default function DocumentVerification() {
                           <p className="text-sm text-muted-foreground">{doc.verification_notes}</p>
                         </div>
                       )}
+
+                      {/* Individual Verify and Reject buttons for pending documents */}
+                      {doc.verification_status === 'pending' && (
+                        <div className="flex gap-2 mt-4 pt-4 border-t">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleVerifyDocument(doc.id)}
+                            disabled={verifyingDocId !== null || rejectingDocId !== null}
+                            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            {verifyingDocId === doc.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Verifying...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Verify
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleRejectDocument(doc.id)}
+                            disabled={verifyingDocId !== null || rejectingDocId !== null}
+                            className="flex-1"
+                          >
+                            {rejectingDocId === doc.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Rejecting...
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="h-4 w-4 mr-2" />
+                                Reject
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 );
               })}
-              
-              {/* Verify All and Reject All Buttons */}
-              {candidateDocuments.some(doc => doc.verification_status === 'pending') && (
-                <div className="pt-4 border-t mt-4 space-y-2">
-                  <Button
-                    variant="default"
-                    size="lg"
-                    className="w-full bg-green-600 hover:bg-green-700 text-white"
-                    onClick={handleVerifyAllDocuments}
-                    disabled={verifyingDocId !== null}
-                  >
-                    {verifyingDocId === 'all' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Verifying All Documents...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Verify All Documents
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="lg"
-                    className="w-full"
-                    onClick={handleRejectAllDocuments}
-                    disabled={verifyingDocId !== null}
-                  >
-                    {verifyingDocId === 'reject-all' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Rejecting All Documents...
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="h-4 w-4 mr-2" />
-                        Reject All Documents
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
             </div>
           )}
           

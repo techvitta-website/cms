@@ -25,3 +25,4 @@ WHERE table_name = 'candidates' AND column_name = 'is_archived';
 
 
 
+

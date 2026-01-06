@@ -241,16 +241,6 @@ export default function Shortlist() {
     const candidate = candidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
-    const comment = commentDrafts[candidateId]?.trim() || "";
-    if (newStatus === "Rejected" && !comment) {
-      toast({
-        title: "Comment required",
-        description: "Please add a rejection reason in the comment box before rejecting.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setUpdatingStatus(candidateId);
     updateStatusMutation.mutate({
       candidateId,
@@ -528,10 +518,10 @@ export default function Shortlist() {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-500 px-2 sm:px-0">
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Shortlisting Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Shortlisting Dashboard</h1>
+        <p className="text-sm sm:text-base text-muted-foreground mt-1">
           Manage candidate status and shortlist candidates for interviews
         </p>
       </div>
@@ -542,17 +532,20 @@ export default function Shortlist() {
         className="w-full"
       >
         <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="shortlist" className="flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            Shortlist
+          <TabsTrigger value="shortlist" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm">
+            <Search className="h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Shortlist</span>
+            <span className="sm:hidden">List</span>
           </TabsTrigger>
-          <TabsTrigger value="history" className="flex items-center gap-2">
-            <History className="h-4 w-4" />
-            History ({shortlistHistory.length})
+          <TabsTrigger value="history" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm">
+            <History className="h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">History</span>
+            <span className="sm:hidden">Hist</span>
+            <span className="ml-1">({shortlistHistory.length})</span>
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="shortlist" className="space-y-6 mt-6">
+        <TabsContent value="shortlist" className="space-y-4 sm:space-y-6 mt-4 sm:mt-6">
       {/* Search Bar */}
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
@@ -564,12 +557,12 @@ export default function Shortlist() {
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Search by name, email, phone, or job title"
-            className="pl-9"
+            className="pl-9 text-sm sm:text-base"
           />
         </div>
       </div>
 
-      <div className="grid gap-6">
+      <div className="grid gap-4 sm:gap-6">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>{searchTerm ? "No candidates found matching your search." : "No candidates found. Upload resumes to see candidates here."}</p>
@@ -589,27 +582,28 @@ export default function Shortlist() {
                 candidate.resume_url && handleViewResume(candidate.resume_url)
               }
             >
-              <div className="flex items-center gap-4">
-                <label className="text-sm font-medium">Status:</label>
-                <Select
-                  value={candidate.status || "Pending"}
-                  onValueChange={(value) =>
-                    handleStatusChange(candidate.id, value)
-                  }
-                  disabled={updatingStatus === candidate.id}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Shortlisted">Shortlisted</SelectItem>
-                    <SelectItem value="Rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-                {updatingStatus === candidate.id && (
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                )}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+                <label className="text-sm font-medium whitespace-nowrap">Status:</label>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Select
+                    value={candidate.status || "Pending"}
+                    onValueChange={(value) =>
+                      handleStatusChange(candidate.id, value)
+                    }
+                    disabled={updatingStatus === candidate.id}
+                  >
+                    <SelectTrigger className="w-full sm:w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Pending">Pending</SelectItem>
+                      <SelectItem value="Shortlisted">Shortlisted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {updatingStatus === candidate.id && (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                </div>
               </div>
               <div className="space-y-2 w-full">
                 <label className="text-sm font-medium">Comment:</label>
@@ -619,7 +613,7 @@ export default function Shortlist() {
                   onChange={(e) => handleCommentChange(candidate.id, e.target.value)}
                   rows={3}
                 />
-                <div className="flex justify-end gap-2 flex-wrap">
+                <div className="flex flex-col sm:flex-row justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -628,6 +622,7 @@ export default function Shortlist() {
                       sendingEmailId === candidate.id ||
                       sendShortlistEmailMutation.isPending
                     }
+                    className="w-full sm:w-auto"
                   >
                     {sendingEmailId === candidate.id ||
                     sendShortlistEmailMutation.isPending ? (
@@ -647,6 +642,7 @@ export default function Shortlist() {
                     size="sm"
                     disabled={savingCommentId === candidate.id}
                     onClick={() => handleSaveComment(candidate.id)}
+                    className="w-full sm:w-auto"
                   >
                     {savingCommentId === candidate.id ? (
                       <>
@@ -665,8 +661,8 @@ export default function Shortlist() {
       </div>
         </TabsContent>
 
-        <TabsContent value="history" className="space-y-6 mt-6">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+        <TabsContent value="history" className="space-y-4 sm:space-y-6 mt-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-foreground">Shortlist mail history</p>
               <p className="text-xs text-muted-foreground">
@@ -703,32 +699,34 @@ export default function Shortlist() {
                   No shortlist emails have been sent yet.
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[140px]">Type</TableHead>
-                      <TableHead>Details</TableHead>
-                      <TableHead className="text-right w-[180px]">Sent At</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredShortlistHistory.map((entry: any) => (
-                      <TableRow key={entry.id} className="hover:bg-accent/40">
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">
-                            Shortlist Email
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {entry.details}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground text-right">
-                          {new Date(entry.created_at).toLocaleString()}
-                        </TableCell>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[140px]">Type</TableHead>
+                        <TableHead>Details</TableHead>
+                        <TableHead className="text-right w-[180px]">Sent At</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredShortlistHistory.map((entry: any) => (
+                        <TableRow key={entry.id} className="hover:bg-accent/40">
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              Shortlist Email
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {entry.details}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground text-right">
+                            {new Date(entry.created_at).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>

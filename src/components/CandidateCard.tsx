@@ -43,39 +43,51 @@ export default function CandidateCard({
 
   return (
     <Card className="hover:shadow-lg transition-shadow">
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between mb-4 gap-4">
+      <CardContent className="p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 gap-3 sm:gap-4">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-foreground mb-1 truncate">
-              {fullName}
-            </h3>
-            <div className="space-y-1 text-sm text-muted-foreground">
-              <p className="truncate">
+            <div className="flex items-start justify-between gap-2 mb-1 sm:mb-0">
+              <h3 className="text-base sm:text-lg font-semibold text-foreground truncate flex-1">
+                {fullName}
+              </h3>
+              {status && (
+                <div className="sm:hidden flex-shrink-0">
+                  {getStatusBadge(status)}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1 text-xs sm:text-sm text-muted-foreground">
+              <p className="break-words sm:truncate">
                 <span className="font-medium">Email:</span> {email}
               </p>
               {phone && (
-                <p className="truncate">
+                <p className="break-words sm:truncate">
                   <span className="font-medium">Phone:</span> {phone}
                 </p>
               )}
               {appliedJob && (
-                <p className="truncate">
+                <p className="break-words sm:truncate">
                   <span className="font-medium">Applied Job:</span> {appliedJob}
                 </p>
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2 flex-shrink-0">
-            {status && getStatusBadge(status)}
+          <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
+            {status && (
+              <div className="hidden sm:block">
+                {getStatusBadge(status)}
+              </div>
+            )}
             {resumeUrl && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={onViewResume}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 w-full sm:w-auto"
               >
                 <ExternalLink className="h-4 w-4" />
-                View Resume
+                <span className="hidden sm:inline">View Resume</span>
+                <span className="sm:hidden">Resume</span>
               </Button>
             )}
           </div>

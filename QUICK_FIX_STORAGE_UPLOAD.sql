@@ -57,3 +57,4 @@ WITH CHECK (true);
 -- Table Editor → candidate_documents → Check RLS policies
 -- Table Editor → candidates → Check RLS policies
 
+

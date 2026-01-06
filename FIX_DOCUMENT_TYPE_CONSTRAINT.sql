@@ -42,3 +42,4 @@ WHERE conrelid = 'candidate_documents'::regclass
 -- After running this, the document upload should work!
 -- ============================================
 
+

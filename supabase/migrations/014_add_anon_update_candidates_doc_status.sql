@@ -18,3 +18,4 @@ WITH CHECK (true);
 -- Note: The application only updates document_verification_status field,
 -- so this is safe. The candidate_id is from the URL, so they can only update their own record.
 
+

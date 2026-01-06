@@ -95,6 +95,7 @@ interface CandidateRow {
   phone: string;
   status: string;
   jobApplied: string;
+  jobId?: string | null;
   createdAt: string | null;
   createdLabel: string | null;
   resumeUrl: string | null;
@@ -124,6 +125,8 @@ export default function Dashboard() {
     phone: "",
     referenceSource: "",
     referrerName: "",
+    jobId: "",
+    customJobTitle: "",
   });
   const [addCandidateDialogOpen, setAddCandidateDialogOpen] = useState(false);
   const [newCandidateForm, setNewCandidateForm] = useState({
@@ -1503,6 +1506,8 @@ export default function Dashboard() {
       phone: candidate.phone === "—" ? "" : candidate.phone,
       referenceSource: candidate.referenceSource || "",
       referrerName: candidate.referrerName || "",
+      jobId: candidate.jobId || "",
+      customJobTitle: "",
     });
     setEditDialogOpen(true);
 
@@ -2695,6 +2700,26 @@ export default function Dashboard() {
           resumeUrl = `${bucket}/${filename}`;
         }
 
+        // Handle custom job title - create job if "other" is selected
+        let finalJobId = editForm.jobId || null;
+        if (editForm.jobId === "other" && editForm.customJobTitle.trim()) {
+          // Create a new job entry for the custom job title
+          const { data: newJob, error: jobError } = await supabase
+            .from('jobs')
+            .insert({
+              job_title: editForm.customJobTitle.trim(),
+            })
+            .select('id')
+            .single();
+          
+          if (jobError) {
+            throw new Error(`Failed to create job: ${jobError.message}`);
+          }
+          finalJobId = newJob.id;
+        } else if (editForm.jobId === "other") {
+          finalJobId = null;
+        }
+
         // Create a new candidate entry in the database
         const { data: newCandidate, error: insertError } = await supabase
           .from('candidates')
@@ -2705,6 +2730,7 @@ export default function Dashboard() {
             resume_url: resumeUrl,
             status: 'Pending',
             resume_processed: false,
+            job_id: finalJobId,
             reference_source: editForm.referenceSource || null,
             referrer_name: editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null,
           })
@@ -2721,6 +2747,26 @@ export default function Dashboard() {
               .maybeSingle();
 
             if (!findError && existing) {
+              // Handle custom job title - create job if "other" is selected
+              let finalJobId = editForm.jobId || null;
+              if (editForm.jobId === "other" && editForm.customJobTitle.trim()) {
+                // Create a new job entry for the custom job title
+                const { data: newJob, error: jobError } = await supabase
+                  .from('jobs')
+                  .insert({
+                    job_title: editForm.customJobTitle.trim(),
+                  })
+                  .select('id')
+                  .single();
+                
+                if (jobError) {
+                  throw new Error(`Failed to create job: ${jobError.message}`);
+                }
+                finalJobId = newJob.id;
+              } else if (editForm.jobId === "other") {
+                finalJobId = null;
+              }
+
               // Update existing candidate
               const { error: updateError } = await supabase
                 .from('candidates')
@@ -2728,6 +2774,7 @@ export default function Dashboard() {
                   full_name: editForm.name.trim(),
                   phone: editForm.phone.trim() || null,
                   resume_url: resumeUrl,
+                  job_id: finalJobId,
                   reference_source: editForm.referenceSource || null,
                   referrer_name: editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null,
                 })
@@ -2748,11 +2795,32 @@ export default function Dashboard() {
           variant: "default",
         });
       } else {
+        // Handle custom job title - create job if "other" is selected
+        let finalJobId = editForm.jobId || null;
+        if (editForm.jobId === "other" && editForm.customJobTitle.trim()) {
+          // Create a new job entry for the custom job title
+          const { data: newJob, error: jobError } = await supabase
+            .from('jobs')
+            .insert({
+              job_title: editForm.customJobTitle.trim(),
+            })
+            .select('id')
+            .single();
+          
+          if (jobError) {
+            throw new Error(`Failed to create job: ${jobError.message}`);
+          }
+          finalJobId = newJob.id;
+        } else if (editForm.jobId === "other") {
+          finalJobId = null;
+        }
+
         // Update existing candidate
         const updates: {
           full_name?: string;
           email?: string;
           phone?: string;
+          job_id?: string | null;
           reference_source?: string | null;
           referrer_name?: string | null;
         } = {};
@@ -2764,6 +2832,7 @@ export default function Dashboard() {
         } else {
           updates.phone = null;
         }
+        updates.job_id = finalJobId;
         updates.reference_source = editForm.referenceSource || null;
         updates.referrer_name = editForm.referenceSource === "friend_referral" ? (editForm.referrerName?.trim() || null) : null;
 
@@ -3480,6 +3549,41 @@ export default function Dashboard() {
                 onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
                 placeholder="Enter phone number"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-job-applied">Job Applied</Label>
+              <Select
+                value={editForm.jobId || undefined}
+                onValueChange={(value) => {
+                  if (value === "other") {
+                    setEditForm({ ...editForm, jobId: "other", customJobTitle: "" });
+                  } else {
+                    setEditForm({ ...editForm, jobId: value, customJobTitle: "" });
+                  }
+                }}
+              >
+                <SelectTrigger id="edit-job-applied">
+                  <SelectValue placeholder="Select job" />
+                </SelectTrigger>
+                <SelectContent>
+                  {jobList.map((job) => (
+                    <SelectItem key={job.id} value={job.id}>
+                      {job.job_title || "Untitled Role"}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+              {editForm.jobId === "other" && (
+                <div className="space-y-2 mt-2">
+                  <Input
+                    id="edit-custom-job-title"
+                    value={editForm.customJobTitle}
+                    onChange={(e) => setEditForm({ ...editForm, customJobTitle: e.target.value })}
+                    placeholder="Please enter the role"
+                  />
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-reference-source">Reference Source</Label>

@@ -18,3 +18,4 @@ USING (true);
 -- Security note: Since candidates access via UUID in URL, they can only access their own record
 -- The application filters by candidate_id, so this is safe
 
+

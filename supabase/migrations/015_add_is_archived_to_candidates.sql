@@ -23,3 +23,4 @@ COMMENT ON COLUMN candidates.is_archived IS 'Indicates if the candidate has been
 
 
 
+

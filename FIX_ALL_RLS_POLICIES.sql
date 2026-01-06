@@ -109,3 +109,4 @@ SELECT policyname, cmd, roles FROM pg_policies
 WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE '%candidate-documents%' AND roles::text LIKE '%anon%'
 ORDER BY cmd;
 
+

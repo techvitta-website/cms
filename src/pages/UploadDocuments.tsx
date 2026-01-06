@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Create a dedicated anonymous client for uploads to ensure no session interference
 const SUPABASE_URL = "https://qzgzmytmfoozociuhgtp.supabase.co";
@@ -120,8 +127,10 @@ export default function UploadDocuments() {
   const [candidateData, setCandidateData] = useState<CandidateData | null>(null);
   const [detailsConfirmed, setDetailsConfirmed] = useState(false);
   const [uploading, setUploading] = useState<{ [key: string]: boolean }>({});
+  const [uploadingAll, setUploadingAll] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<{ [key: string]: UploadedDoc[] }>({});
   const [files, setFiles] = useState<{ [key: string]: File[] }>({});
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -303,12 +312,18 @@ export default function UploadDocuments() {
         variant: "destructive",
       });
       setFiles((prev) => ({ ...prev, [key]: [validFiles[0]] }));
+    } else if (docConfig && "allowMultiple" in docConfig && docConfig.allowMultiple) {
+      // Append to existing files for multi-upload documents (e.g., Educational Credentials)
+      setFiles((prev) => ({
+        ...prev,
+        [key]: [...(prev[key] || []), ...validFiles],
+      }));
     } else {
       setFiles((prev) => ({ ...prev, [key]: validFiles }));
     }
   };
 
-  const handleUpload = async (docType: string, subKey?: string) => {
+  const handleUploadSingle = async (docType: string, subKey?: string) => {
     const key = subKey ? `${docType}_${subKey}` : docType;
     const filesToUpload = files[key];
 
@@ -317,108 +332,8 @@ export default function UploadDocuments() {
     setUploading((prev) => ({ ...prev, [key]: true }));
 
     try {
-      // Ensure we're using anonymous access - clear any existing session
-      // This is important for anonymous uploads to work correctly
-      const { data: session } = await supabase.auth.getSession();
-      if (session?.session) {
-        console.log("Session detected, ensuring anonymous access for upload");
-        // Don't sign out, but ensure the storage call uses anon key
-      }
-
-      // Use candidate_id (UUID) for folder name to match storage policy pattern
-      // This ensures the folder name is long enough and matches the required pattern
-      const candidateIdFolder = id;
-
-      for (const file of filesToUpload) {
-        const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-        const timestamp = Date.now();
-        const storagePath = `${candidateIdFolder}/${docType}_${subKey || ""}${timestamp}_${sanitizedFileName}`;
-
-        console.log("Attempting upload:", {
-          bucket: "candidate-documents",
-          path: storagePath,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-        });
-
-        // Use anonymous client for upload to ensure no session interference
-        // This ensures the upload uses the anon key and anon policies
-        const { data: uploadData, error: uploadError } = await anonSupabase.storage
-          .from("candidate-documents")
-          .upload(storagePath, file, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
-        if (uploadError) {
-          console.error("Storage upload error details:", {
-            error: uploadError,
-            message: uploadError.message,
-            statusCode: (uploadError as any)?.statusCode,
-            errorCode: (uploadError as any)?.error,
-            storagePath,
-            bucket: "candidate-documents",
-            candidateId: id,
-          });
-          throw uploadError;
-        }
-
-        console.log("Upload successful:", uploadData);
-
-        // Determine document name (include subKey label for aadhar/pan)
-        let documentName = DOCUMENT_TYPES.find((d) => d.id === docType)?.label || docType;
-        if (subKey) {
-          const idProofConfig = DOCUMENT_TYPES.find((d) => d.id === "id_proof");
-          if (idProofConfig && "fields" in idProofConfig) {
-            const field = idProofConfig.fields.find((f) => f.key === subKey);
-            if (field) {
-              documentName = field.label;
-            }
-          }
-        }
-
-        // Check if this is the first document BEFORE inserting
-        // Use anonymous client for database operations too
-        const { data: existingDocs } = await anonSupabase
-          .from("candidate_documents")
-          .select("id")
-          .eq("candidate_id", id)
-          .limit(1);
-
-        const isFirstDocument = !existingDocs || existingDocs.length === 0;
-
-        // Save document record using anonymous client
-        const { error: dbError } = await anonSupabase.from("candidate_documents").insert({
-          candidate_id: id,
-          document_type: docType,
-          document_name: documentName,
-          file_url: `candidate-documents/${storagePath}`,
-          file_name: file.name,
-          file_size: file.size,
-          mime_type: file.type,
-          verification_status: "pending",
-        });
-
-        if (dbError) {
-          console.error("Database insert error:", dbError);
-          throw dbError;
-        }
-
-        // Update candidate status to 'submitted' when first document is uploaded
-        if (isFirstDocument) {
-          const { error: updateError } = await anonSupabase
-            .from("candidates")
-            .update({ document_verification_status: "submitted" })
-            .eq("id", id);
-          
-          if (updateError) {
-            console.error("Candidate update error:", updateError);
-            // Don't throw - this is not critical for the upload
-          }
-        }
-      }
-
+      await uploadFiles(docType, filesToUpload, subKey);
+      
       // Reload uploaded documents to get updated list
       await loadUploadedDocuments(id);
 
@@ -436,6 +351,144 @@ export default function UploadDocuments() {
       });
     } finally {
       setUploading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const uploadFiles = async (docType: string, filesToUpload: File[], subKey?: string) => {
+    if (!id || !candidateData) return;
+
+    // Use candidate_id (UUID) for folder name to match storage policy pattern
+    const candidateIdFolder = id;
+
+    for (const file of filesToUpload) {
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const timestamp = Date.now();
+      const storagePath = `${candidateIdFolder}/${docType}_${subKey || ""}${timestamp}_${sanitizedFileName}`;
+
+      // Use anonymous client for upload to ensure no session interference
+      const { data: uploadData, error: uploadError } = await anonSupabase.storage
+        .from("candidate-documents")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Storage upload error details:", uploadError);
+        throw uploadError;
+      }
+
+      // Determine document name (include subKey label for aadhar/pan)
+      let documentName = DOCUMENT_TYPES.find((d) => d.id === docType)?.label || docType;
+      if (subKey) {
+        const idProofConfig = DOCUMENT_TYPES.find((d) => d.id === "id_proof");
+        if (idProofConfig && "fields" in idProofConfig) {
+          const field = idProofConfig.fields.find((f) => f.key === subKey);
+          if (field) {
+            documentName = field.label;
+          }
+        }
+      }
+
+      // Check if this is the first document BEFORE inserting
+      const { data: existingDocs } = await anonSupabase
+        .from("candidate_documents")
+        .select("id")
+        .eq("candidate_id", id)
+        .limit(1);
+
+      const isFirstDocument = !existingDocs || existingDocs.length === 0;
+
+      // Save document record using anonymous client
+      const { error: dbError } = await anonSupabase.from("candidate_documents").insert({
+        candidate_id: id,
+        document_type: docType,
+        document_name: documentName,
+        file_url: `candidate-documents/${storagePath}`,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type,
+        verification_status: "pending",
+      });
+
+      if (dbError) {
+        console.error("Database insert error:", dbError);
+        throw dbError;
+      }
+
+      // Update candidate status to 'submitted' when first document is uploaded
+      if (isFirstDocument) {
+        const { error: updateError } = await anonSupabase
+          .from("candidates")
+          .update({ document_verification_status: "submitted" })
+          .eq("id", id);
+        
+        if (updateError) {
+          console.error("Candidate update error:", updateError);
+        }
+      }
+    }
+  };
+
+  const handleUploadAll = async () => {
+    if (!id || !candidateData) return;
+
+    // Check if there are any files to upload
+    const hasFiles = Object.keys(files).some(key => files[key] && files[key].length > 0);
+    if (!hasFiles) {
+      toast({
+        title: "No Files Selected",
+        description: "Please select files to upload",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingAll(true);
+
+    try {
+      // Upload all files
+      for (const [key, fileList] of Object.entries(files)) {
+        if (!fileList || fileList.length === 0) continue;
+
+        // Parse key to get docType and subKey
+        // Handle id_proof keys specially (id_proof_aadhar, id_proof_pan)
+        let docType: string;
+        let subKey: string | undefined;
+        
+        if (key.startsWith('id_proof_')) {
+          docType = 'id_proof';
+          subKey = key.replace('id_proof_', '');
+          // Validate subKey is either 'aadhar' or 'pan'
+          if (subKey !== 'aadhar' && subKey !== 'pan') {
+            console.error(`Invalid subKey for id_proof: ${subKey}`);
+            continue;
+          }
+        } else {
+          // For other document types, the key is the docType itself
+          docType = key;
+          subKey = undefined;
+        }
+
+        await uploadFiles(docType, fileList, subKey);
+      }
+
+      // Reload uploaded documents
+      await loadUploadedDocuments(id);
+
+      // Clear all files
+      setFiles({});
+
+      // Show success dialog
+      setShowSuccessDialog(true);
+    } catch (error: any) {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload documents",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingAll(false);
     }
   };
 
@@ -678,35 +731,27 @@ export default function UploadDocuments() {
                                 </div>
                               )}
 
-
-                              <div className="flex gap-2">
-                                <Input
+                              <div className="relative">
+                                <input
                                   type="file"
                                   accept={ACCEPTED_FILE_TYPES}
                                   onChange={(e) =>
                                     handleFileSelect(docType.id, e.target.files, field.key)
                                   }
-                                  disabled={uploading[key] || isAlreadyUploaded}
-                                  className="flex-1"
+                                  disabled={uploading[key] || isAlreadyUploaded || uploadingAll}
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
                                   title={isAlreadyUploaded ? "Limit reached - File already uploaded" : ""}
+                                  id={`file-input-${key}`}
                                 />
-                                <Button
-                                  onClick={() => handleUpload(docType.id, field.key)}
-                                  disabled={!files[key] || files[key].length === 0 || uploading[key] || isAlreadyUploaded}
-                                  className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
-                                >
-                                  {uploading[key] ? (
-                                    <>
-                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                      Uploading...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Upload className="h-4 w-4 mr-2" />
-                                      Upload
-                                    </>
-                                  )}
-                                </Button>
+                                <div className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                                  <span className="text-muted-foreground">
+                                    {files[key] && files[key].length > 0 
+                                      ? (files[key].length === 1 
+                                          ? files[key][0].name 
+                                          : `${files[key].length} files - ${files[key].map((f) => f.name).join(", ")}`)
+                                      : "No file chosen"}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           );
@@ -759,38 +804,30 @@ export default function UploadDocuments() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Input
+                      <div className="relative">
+                        <input
                           type="file"
                           accept={ACCEPTED_FILE_TYPES}
                           multiple={allowMultiple}
-                          onChange={(e) => handleFileSelect(docType.id, e.target.files)}
-                          disabled={uploading[docType.id] || isAlreadyUploaded}
-                          className="flex-1"
+                          onChange={(e) => {
+                            handleFileSelect(docType.id, e.target.files);
+                            // Clear the input so users can re-select (even the same) files
+                            if (e.target) e.target.value = "";
+                          }}
+                          disabled={uploading[docType.id] || isAlreadyUploaded || uploadingAll}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
                           title={isAlreadyUploaded ? "Limit reached - File already uploaded" : ""}
+                          id={`file-input-${docType.id}`}
                         />
-                        <Button
-                          onClick={() => handleUpload(docType.id)}
-                          disabled={
-                            !files[docType.id] ||
-                            files[docType.id].length === 0 ||
-                            uploading[docType.id] ||
-                            isAlreadyUploaded
-                          }
-                          className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
-                        >
-                          {uploading[docType.id] ? (
-                            <>
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                              Uploading...
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="h-4 w-4 mr-2" />
-                              Upload
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                          <span className="text-muted-foreground">
+                            {files[docType.id] && files[docType.id].length > 0 
+                              ? (files[docType.id].length === 1 
+                                  ? files[docType.id][0].name 
+                                  : `${files[docType.id].length} files - ${files[docType.id].map((f) => f.name).join(", ")}`)
+                              : "No file chosen"}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Maximum file size: 10 MB per file. Only PDF format is accepted.
@@ -803,14 +840,50 @@ export default function UploadDocuments() {
             </div>
 
             <div className="pt-4 border-t">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground mb-4">
                 <strong>Note:</strong> All documents will be reviewed by HR. You will be notified
                 once the verification is complete.
               </p>
+              
+              <Button
+                onClick={handleUploadAll}
+                disabled={uploadingAll || !Object.keys(files).some(key => files[key] && files[key].length > 0)}
+                className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground"
+                size="lg"
+              >
+                {uploadingAll ? (
+                  <>
+                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                    Uploading All Documents...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-5 w-5 mr-2" />
+                    Upload All
+                  </>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Success Dialog */}
+      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-600">
+              <CheckCircle className="h-6 w-6" />
+              Successfully Uploaded
+            </DialogTitle>
+            <DialogDescription className="pt-4">
+              <p className="text-base">
+                Successfully uploaded. You can leave this place, we will contact you later.
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

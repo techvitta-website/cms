@@ -74,3 +74,4 @@ ON storage.objects FOR DELETE
 TO service_role
 USING (bucket_id = 'candidate-documents');
 
+

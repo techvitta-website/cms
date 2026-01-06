@@ -27,7 +27,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { CalendarIcon, Clock, Loader2, Mail, Search, History, ExternalLink, Video, MessageSquare } from "lucide-react";
+import { CalendarIcon, Clock, Loader2, Mail, Search, History, ExternalLink, Video } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { openResume } from "@/lib/resume";
@@ -71,18 +71,6 @@ interface InterviewFormData {
   panelRoomDetails: string;
 }
 
-interface EmailReply {
-  id: string;
-  candidate_id: string | null;
-  candidate_email: string;
-  candidate_name: string | null;
-  subject: string | null;
-  reply_content: string;
-  received_at: string;
-  status: string;
-  email_stage: string | null;
-}
-
 export default function Interview() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -106,8 +94,6 @@ export default function Interview() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("schedule");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
-  const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
-  const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
   // Fetch only shortlisted candidates
   const { data: candidates = [], isLoading } = useQuery({
@@ -488,32 +474,6 @@ export default function Interview() {
     });
   }, [candidates, searchTerm]);
 
-  // Fetch email replies for interview stage
-  const { data: emailReplies = [] } = useQuery({
-    queryKey: ["email-replies-interview"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("email_replies")
-        .select("*")
-        .eq("email_stage", "interview")
-        .order("received_at", { ascending: false });
-
-      if (error) throw error;
-      return (data || []) as EmailReply[];
-    },
-  });
-
-  const handleViewReplies = (candidate: Candidate) => {
-    setSelectedCandidateForReplies(candidate);
-    setRepliesDialogOpen(true);
-  };
-
-  const getCandidateReplies = (candidate: Candidate) => {
-    return emailReplies.filter(
-      (reply) => reply.candidate_email.toLowerCase() === candidate.email.toLowerCase()
-    );
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -581,14 +541,6 @@ export default function Interview() {
               }
             >
               <div className="flex gap-2 flex-wrap">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleViewReplies(candidate)}
-                >
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  Replies ({getCandidateReplies(candidate).length})
-                </Button>
                 <Dialog open={isDialogOpen && selectedCandidate?.id === candidate.id} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger asChild>
                     <Button onClick={() => handleOpenDialog(candidate)}>
@@ -663,17 +615,47 @@ export default function Interview() {
 
                       <div>
                         <Label>Interview Time</Label>
-                        <div className="relative">
-                          <Clock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            type="time"
-                            value={formData.interviewTime}
-                            onChange={(e) =>
-                              setFormData({ ...formData, interviewTime: e.target.value })
-                            }
-                            className="pl-10"
-                            required
-                          />
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <Clock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                            <Select
+                              value={formData.interviewTime ? formData.interviewTime.split(':')[0] : ""}
+                              onValueChange={(hour) => {
+                                const currentMinute = formData.interviewTime ? formData.interviewTime.split(':')[1] || "00" : "00";
+                                setFormData({ ...formData, interviewTime: `${hour}:${currentMinute}` });
+                              }}
+                            >
+                              <SelectTrigger className="pl-10">
+                                <SelectValue placeholder="HH" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 24 }, (_, i) => (
+                                  <SelectItem key={i} value={String(i).padStart(2, '0')}>
+                                    {String(i).padStart(2, '0')}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <span className="text-lg font-semibold">:</span>
+                          <Select
+                            value={formData.interviewTime ? formData.interviewTime.split(':')[1] : ""}
+                            onValueChange={(minute) => {
+                              const currentHour = formData.interviewTime ? formData.interviewTime.split(':')[0] || "00" : "00";
+                              setFormData({ ...formData, interviewTime: `${currentHour}:${minute}` });
+                            }}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="MM" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {['00', '15', '30', '45'].map((min) => (
+                                <SelectItem key={min} value={min}>
+                                  {min}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -964,44 +946,6 @@ export default function Interview() {
         </TabsContent>
       </Tabs>
 
-      {/* Email Replies Dialog */}
-      <Dialog open={repliesDialogOpen} onOpenChange={setRepliesDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Email Replies from {selectedCandidateForReplies?.full_name || "Candidate"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            {selectedCandidateForReplies && getCandidateReplies(selectedCandidateForReplies).length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                <p>No email replies received yet from this candidate for interview stage.</p>
-              </div>
-            ) : (
-              selectedCandidateForReplies &&
-              getCandidateReplies(selectedCandidateForReplies).map((reply) => (
-                <div key={reply.id} className="border rounded-lg p-4 space-y-3 bg-card">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{reply.subject || "No Subject"}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Received: {new Date(reply.received_at).toLocaleString()}
-                      </p>
-                    </div>
-                    <Badge variant={reply.status === "unread" ? "default" : "secondary"} className="text-xs">
-                      {reply.status}
-                    </Badge>
-                  </div>
-                  <div className="text-sm whitespace-pre-wrap border-t pt-3 text-muted-foreground bg-muted/30 p-3 rounded">
-                    {reply.reply_content.length > 500
-                      ? reply.reply_content.substring(0, 500) + "..."
-                      : reply.reply_content}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

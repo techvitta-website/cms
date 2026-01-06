@@ -25,3 +25,4 @@ USING (bucket_id = 'candidate-documents');
 -- This is simpler and should work immediately
 -- ============================================
 
+

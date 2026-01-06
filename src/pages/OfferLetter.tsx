@@ -798,6 +798,47 @@ export default function OfferLetter() {
     });
   }, [offerLettersHistory, historySearchTerm]);
 
+  // Determine which columns to show based on actual data
+  const visibleColumns = useMemo(() => {
+    if (filteredOfferLettersHistory.length === 0) {
+      // Show all columns if no data
+      return {
+        candidateName: true,
+        email: true,
+        position: true,
+        department: true,
+        type: true,
+        startDate: true,
+        endDate: true,
+        manager: true,
+        location: true,
+        salary: true,
+        issuedDate: true,
+        document: true,
+      };
+    }
+
+    // Check which columns have at least one non-empty value
+    const hasData = {
+      candidateName: filteredOfferLettersHistory.some((offer: any) => offer.candidates?.full_name),
+      email: filteredOfferLettersHistory.some((offer: any) => offer.email),
+      position: filteredOfferLettersHistory.some((offer: any) => offer.position),
+      department: filteredOfferLettersHistory.some((offer: any) => offer.department),
+      type: filteredOfferLettersHistory.some((offer: any) => offer.internship_type),
+      startDate: filteredOfferLettersHistory.some((offer: any) => offer.start_date),
+      endDate: filteredOfferLettersHistory.some((offer: any) => offer.end_date),
+      manager: filteredOfferLettersHistory.some((offer: any) => offer.manager_name),
+      location: filteredOfferLettersHistory.some((offer: any) => offer.joining_location),
+      salary: filteredOfferLettersHistory.some((offer: any) => 
+        offer.salary && offer.salary.toString().trim().length > 0
+      ),
+      issuedDate: filteredOfferLettersHistory.some((offer: any) => offer.created_at),
+      document: filteredOfferLettersHistory.some((offer: any) => offer.offer_letter_url),
+    };
+
+    return hasData;
+  }, [filteredOfferLettersHistory]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -893,14 +934,14 @@ export default function OfferLetter() {
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
+                  {/* <DialogHeader>
                     <DialogTitle>Generate Digital Offer Letter</DialogTitle>
                     <DialogDescription>
                       Fill in the details to generate an offer letter for {candidate.full_name}
                     </DialogDescription>
-                  </DialogHeader>
+                  </DialogHeader> */}
                   <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-                    <div>
+                    {/* <div>
                       <Label>Candidate Name</Label>
                       <Input
                         value={candidate.full_name}
@@ -1026,9 +1067,9 @@ export default function OfferLetter() {
                         placeholder="Enter candidate email"
                         required
                       />
-                    </div>
+                    </div> */}
 
-                    <div className="flex justify-end gap-2 pt-4">
+                    <div className="flex flex-col justify-end gap-2 pt-4">
                       <Button
                         type="button"
                         variant="outline"
@@ -1040,7 +1081,7 @@ export default function OfferLetter() {
                         <Upload className="mr-2 h-4 w-4" />
                         Upload Offer Letter
                       </Button>
-                      <Button
+                    {/* <div className="flex justify-between p-4">  <Button
                         type="button"
                         variant="outline"
                         onClick={() => setIsDialogOpen(false)}
@@ -1062,7 +1103,7 @@ export default function OfferLetter() {
                             Mark as Generated
                           </>
                         )}
-                      </Button>
+                      </Button></div> */}
                     </div>
                   </form>
                 </DialogContent>
@@ -1101,7 +1142,7 @@ export default function OfferLetter() {
               <Input
                 value={historySearchTerm}
                 onChange={(event) => setHistorySearchTerm(event.target.value)}
-                placeholder="Search by name, email, position, department, manager, location, or type"
+                placeholder="Search by name, email, or phone"
                 className="pl-9"
               />
             </div>
@@ -1122,15 +1163,7 @@ export default function OfferLetter() {
                   <TableRow>
                     <TableHead>Candidate Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Position</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Start Date</TableHead>
-                    <TableHead>End Date</TableHead>
-                    <TableHead>Manager</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Salary</TableHead>
-                    <TableHead>Issued Date</TableHead>
+                    <TableHead>Phone</TableHead>
                     <TableHead>Document</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1140,40 +1173,8 @@ export default function OfferLetter() {
                       <TableCell className="font-medium">
                         {offer.candidates?.full_name || "N/A"}
                       </TableCell>
-                      <TableCell>{offer.email}</TableCell>
-                      <TableCell>{offer.position}</TableCell>
-                      <TableCell>{offer.department}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={offer.internship_type === "Paid" ? "default" : "secondary"}
-                        >
-                          {offer.internship_type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {offer.start_date
-                          ? format(new Date(offer.start_date), "MMM dd, yyyy")
-                          : "N/A"}
-                      </TableCell>
-                      <TableCell>
-                        {offer.end_date
-                          ? format(new Date(offer.end_date), "MMM dd, yyyy")
-                          : "N/A"}
-                      </TableCell>
-                      <TableCell>{offer.manager_name}</TableCell>
-                      <TableCell>{offer.joining_location}</TableCell>
-                      <TableCell>
-                        {offer.salary && offer.salary.toString().trim().length > 0
-                          ? offer.salary
-                          : offer.internship_type === "Unpaid"
-                          ? "Unpaid"
-                          : "Not provided"}
-                      </TableCell>
-                      <TableCell>
-                        {offer.created_at
-                          ? format(new Date(offer.created_at), "MMM dd, yyyy HH:mm")
-                          : "N/A"}
-                      </TableCell>
+                      <TableCell>{offer.email || "N/A"}</TableCell>
+                      <TableCell>{offer.candidates?.phone || "N/A"}</TableCell>
                       <TableCell>
                         {offer.offer_letter_url ? (
                           <Button

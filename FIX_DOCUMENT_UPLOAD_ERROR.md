@@ -118,3 +118,4 @@ Run these migrations in Supabase Dashboard → SQL Editor (in order):
 3. **Check Console**: Open browser console (F12) to see detailed error messages
 4. **Verify Bucket Name**: Ensure bucket name is exactly `candidate-documents` (lowercase, with hyphen)
 
+
