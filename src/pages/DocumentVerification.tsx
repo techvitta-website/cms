@@ -6,6 +6,7 @@ import CandidateCard from "@/components/CandidateCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -79,6 +80,9 @@ export default function DocumentVerification() {
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [rejectingDocId, setRejectingDocId] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+  const [rejectFeedback, setRejectFeedback] = useState("");
+  const [documentToReject, setDocumentToReject] = useState<{ docId: string; docType: string } | null>(null);
 
   // Fetch candidates for CID Verification:
   // 1. Candidates with feedback_decision = "Approve" 
@@ -296,7 +300,73 @@ export default function DocumentVerification() {
         .order('uploaded_at', { ascending: false });
 
       if (error) throw error;
-      setCandidateDocuments((data || []) as CandidateDocument[]);
+
+      // Filter documents: Show only latest per type/subtype
+      // If there's a non-rejected document, hide rejected ones
+      if (data && data.length > 0) {
+        const allDocs = data as CandidateDocument[];
+        const filteredDocs: CandidateDocument[] = [];
+        const docsByType: { [key: string]: CandidateDocument[] } = {};
+
+        // Group documents by type
+        allDocs.forEach((doc) => {
+          const docType = doc.document_type;
+          if (!docsByType[docType]) {
+            docsByType[docType] = [];
+          }
+          docsByType[docType].push(doc);
+        });
+
+        // Filter each document type
+        Object.keys(docsByType).forEach((docType) => {
+          const docs = docsByType[docType];
+          const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
+          const allowMultiple = docConfig && docConfig.id === 'educational_credentials'; // Educational credentials allows multiple
+          
+          if (docType === "id_proof") {
+            // For ID proof, handle aadhar and pan separately (both are single-upload)
+            const aadharDocs = docs.filter((d) => 
+              d.document_name?.toLowerCase().includes("aadhar")
+            ).sort((a, b) => 
+              new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+            );
+            
+            const panDocs = docs.filter((d) => 
+              d.document_name?.toLowerCase().includes("pan")
+            ).sort((a, b) => 
+              new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+            );
+
+            // Show only latest aadhar doc
+            if (aadharDocs.length > 0) {
+              filteredDocs.push(aadharDocs[0]);
+            }
+
+            // Show only latest pan doc
+            if (panDocs.length > 0) {
+              filteredDocs.push(panDocs[0]);
+            }
+          } else if (allowMultiple) {
+            // For multi-upload documents (like educational_credentials)
+            // Show all non-rejected documents, or all if all are rejected
+            const hasNonRejected = docs.some((d) => d.verification_status !== "rejected");
+            const filtered = hasNonRejected
+              ? docs.filter((d) => d.verification_status !== "rejected")
+              : docs;
+            filteredDocs.push(...filtered);
+          } else {
+            // For single-upload document types, show only the latest document
+            // Documents are already sorted by uploaded_at desc
+            if (docs.length > 0) {
+              filteredDocs.push(docs[0]);
+            }
+          }
+        });
+
+        setCandidateDocuments(filteredDocs);
+      } else {
+        setCandidateDocuments([]);
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -581,10 +651,29 @@ export default function DocumentVerification() {
   const handleRejectDocument = async (docId: string) => {
     if (!selectedCandidate) return;
     
-    setRejectingDocId(docId);
+    // Find the document to get its type
+    const doc = candidateDocuments.find(d => d.id === docId);
+    const docTypeInfo = DOCUMENT_TYPES.find(d => d.id === doc?.document_type);
+    const docTypeLabel = docTypeInfo?.label || doc?.document_name || "document";
+    
+    // Open rejection dialog
+    setDocumentToReject({ docId, docType: docTypeLabel });
+    setRejectFeedback("");
+    setIsRejectDialogOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!selectedCandidate || !documentToReject) return;
+    
+    setRejectingDocId(documentToReject.docId);
+    setIsRejectDialogOpen(false);
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const verifiedBy = user?.id || null;
+
+      // Get upload link (from uploadLinks state or generate it)
+      const uploadLink = uploadLinks[selectedCandidate.id] || `${window.location.origin}/${selectedCandidate.id}/upload-documents`;
 
       // Update document to rejected
       const { error } = await supabase
@@ -593,19 +682,50 @@ export default function DocumentVerification() {
           verification_status: 'rejected',
           verified_at: new Date().toISOString(),
           verified_by: verifiedBy,
+          verification_notes: rejectFeedback || null,
         })
-        .eq('id', docId);
+        .eq('id', documentToReject.docId);
 
       if (error) throw error;
+
+      // Send rejection email with feedback and upload link
+      const { data: emailData, error: emailError } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: selectedCandidate.email,
+          candidateName: selectedCandidate.full_name,
+          emailType: "document-rejection",
+          data: {
+            companyName: COMPANY_NAME,
+            positionTitle: selectedCandidate.jobs?.job_title || "the role",
+            uploadLink: uploadLink,
+            feedbackNotes: rejectFeedback || "The document does not meet our requirements. Please upload a corrected version.",
+            documentType: documentToReject.docType,
+          },
+        },
+      });
+
+      if (emailError) {
+        console.error("Email error:", emailError);
+        // Don't throw - document is already rejected, just log the email error
+      } else if (!emailData?.success) {
+        console.error("Email failed:", emailData?.error);
+      } else {
+        // Log email sent activity
+        void supabase.from("activity_logs").insert({
+          action: "DOCUMENT_REJECTION_EMAIL_SENT",
+          details: `Document rejection email sent to ${selectedCandidate.full_name} (${selectedCandidate.email}) for document: ${documentToReject.docType}`,
+        });
+      }
 
       // Update local state
       setCandidateDocuments(prev =>
         prev.map(doc =>
-          doc.id === docId
+          doc.id === documentToReject.docId
             ? {
                 ...doc,
                 verification_status: 'rejected',
                 verified_at: new Date().toISOString(),
+                verification_notes: rejectFeedback || null,
               }
             : doc
         )
@@ -613,8 +733,7 @@ export default function DocumentVerification() {
 
       toast({
         title: "Document Rejected",
-        description: "Document has been rejected.",
-        variant: "destructive",
+        description: "Document has been rejected and email sent to candidate with feedback and upload link.",
       });
     } catch (error: any) {
       toast({
@@ -624,6 +743,8 @@ export default function DocumentVerification() {
       });
     } finally {
       setRejectingDocId(null);
+      setDocumentToReject(null);
+      setRejectFeedback("");
     }
   };
 
@@ -1242,6 +1363,70 @@ export default function DocumentVerification() {
               }}
             >
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Document Dialog */}
+      <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Reject Document</DialogTitle>
+            <DialogDescription>
+              Please provide feedback for rejecting this document. The candidate will receive an email with your feedback and a link to upload a corrected version.
+            </DialogDescription>
+          </DialogHeader>
+          {documentToReject && selectedCandidate && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Document</Label>
+                <p className="text-sm font-medium">{documentToReject.docType}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reject-feedback">Feedback / Reason for Rejection *</Label>
+                <Textarea
+                  id="reject-feedback"
+                  placeholder="Please provide specific feedback about why this document is being rejected. For example: 'The document is not clear', 'Missing information', 'Wrong format', etc."
+                  value={rejectFeedback}
+                  onChange={(e) => setRejectFeedback(e.target.value)}
+                  rows={5}
+                  className="resize-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  This feedback will be sent to the candidate via email along with the upload link.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsRejectDialogOpen(false);
+                setDocumentToReject(null);
+                setRejectFeedback("");
+              }}
+              disabled={rejectingDocId !== null}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmReject}
+              disabled={rejectingDocId !== null || !rejectFeedback.trim()}
+              variant="destructive"
+            >
+              {rejectingDocId ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Rejecting...
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Reject & Send Email
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

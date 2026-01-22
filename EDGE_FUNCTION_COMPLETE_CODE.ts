@@ -12,7 +12,7 @@ declare const Deno: {
   };
 };
 
-const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "Techvitta Innovations Pvt Ltd <hr@cms.techvitta.in>";
+const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "Techvitta Innovations Pvt Ltd <hr@techvitta.in>";
 
 interface EmailRequest {
   to: string;
@@ -492,7 +492,4 @@ function corsHeaders() {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
   };
 }
-
-
-
 

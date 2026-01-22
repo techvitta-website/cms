@@ -167,8 +167,17 @@ export default function ExperienceLetter() {
       const experienceLetterUrl = urlData.publicUrl;
 
       // 3. Convert file to base64 for email attachment
+      // Use chunk-based conversion to avoid "Maximum call stack size exceeded" error for large files
       const fileArrayBuffer = await file.arrayBuffer();
-      const fileBase64 = btoa(String.fromCharCode(...new Uint8Array(fileArrayBuffer)));
+      const uint8Array = new Uint8Array(fileArrayBuffer);
+      const chunkSize = 8192; // Process in 8KB chunks
+      let fileBase64 = '';
+      
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, i + chunkSize);
+        fileBase64 += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      fileBase64 = btoa(fileBase64);
 
       // 4. Optionally send email with attachment (skip if already sent)
       let emailSent = false;

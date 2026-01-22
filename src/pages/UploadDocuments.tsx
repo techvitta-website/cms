@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { createClient } from "@supabase/supabase-js";
-import { Upload, CheckCircle, FileText, Loader2, AlertCircle, UserCheck } from "lucide-react";
+import { Upload, CheckCircle, FileText, Loader2, AlertCircle, UserCheck, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -117,6 +117,7 @@ interface UploadedDoc {
   fileName: string;
   uploadedAt: string;
   subType?: string; // for aadhar/pan under id_proof
+  verificationStatus?: string; // pending, verified, rejected
 }
 
 export default function UploadDocuments() {
@@ -202,34 +203,80 @@ export default function UploadDocuments() {
       // Use anonymous client for reading documents
       const { data } = await anonSupabase
         .from("candidate_documents")
-        .select("document_type, file_name, uploaded_at, document_name")
+        .select("document_type, file_name, uploaded_at, document_name, verification_status")
         .eq("candidate_id", candidateId)
         .order("uploaded_at", { ascending: false });
 
       if (data) {
         const uploaded: { [key: string]: UploadedDoc[] } = {};
+        const allDocs: { [key: string]: UploadedDoc[] } = {};
+        
+        // First, collect all documents
         data.forEach((doc) => {
           const docType = doc.document_type;
-          if (!uploaded[docType]) {
-            uploaded[docType] = [];
+          if (!allDocs[docType]) {
+            allDocs[docType] = [];
           }
 
           // Check if it's an aadhar/pan subtype (stored in document_name)
+          // document_name is set to "Aadhar Card" or "PAN Card" when uploaded
           let subType: string | undefined;
           if (docType === "id_proof") {
-            if (doc.document_name?.toLowerCase().includes("aadhar")) {
+            const docNameLower = doc.document_name?.toLowerCase() || "";
+            if (docNameLower.includes("aadhar")) {
               subType = "aadhar";
-            } else if (doc.document_name?.toLowerCase().includes("pan")) {
+            } else if (docNameLower.includes("pan")) {
               subType = "pan";
             }
           }
 
-          uploaded[docType].push({
+          allDocs[docType].push({
             fileName: doc.file_name,
             uploadedAt: doc.uploaded_at,
             subType,
+            verificationStatus: doc.verification_status || "pending",
           });
         });
+
+        // Filter: Show only the latest document per type/subtype for single-upload docs
+        // For multi-upload docs, show all non-rejected (or all if all rejected)
+        Object.keys(allDocs).forEach((docType) => {
+          const docs = allDocs[docType];
+          const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
+          const allowMultiple = docConfig && "allowMultiple" in docConfig && docConfig.allowMultiple;
+          
+          // Ensure docs are sorted by uploaded_at desc (most recent first)
+          const sortedDocs = [...docs].sort((a, b) => 
+            new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+          );
+          
+          if (docType === "id_proof") {
+            // For ID proof, handle aadhar and pan separately (both are single-upload)
+            const aadharDocs = sortedDocs.filter((d) => d.subType === "aadhar");
+            const panDocs = sortedDocs.filter((d) => d.subType === "pan");
+            
+            // Show only the latest aadhar doc (first in sorted array = most recent)
+            const latestAadhar = aadharDocs.length > 0 ? [aadharDocs[0]] : [];
+            
+            // Show only the latest pan doc (first in sorted array = most recent)
+            const latestPan = panDocs.length > 0 ? [panDocs[0]] : [];
+            
+            uploaded[docType] = [...latestAadhar, ...latestPan];
+          } else if (allowMultiple) {
+            // For multi-upload documents (like educational_credentials)
+            // Show all non-rejected documents, or all if all are rejected
+            const hasNonRejected = sortedDocs.some((d) => d.verificationStatus !== "rejected");
+            uploaded[docType] = hasNonRejected
+              ? sortedDocs.filter((d) => d.verificationStatus !== "rejected")
+              : sortedDocs;
+          } else {
+            // For single-upload document types, show only the latest document
+            // First document in sorted array is the most recent
+            const latestDoc = sortedDocs.length > 0 ? [sortedDocs[0]] : [];
+            uploaded[docType] = latestDoc;
+          }
+        });
+        
         setUploadedDocs(uploaded);
       }
     } catch (error) {
@@ -244,12 +291,13 @@ export default function UploadDocuments() {
     const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
     
     // Check if document already uploaded and multiple not allowed
+    // Allow re-upload if document is rejected
     if (docConfig && "allowMultiple" in docConfig && !docConfig.allowMultiple) {
       const uploaded = uploadedDocs[docType];
       if (subKey) {
         // For ID proof sub-types (aadhar/pan)
-        const subTypeUploaded = uploaded?.some((d) => d.subType === subKey);
-        if (subTypeUploaded) {
+        const subTypeDoc = uploaded?.find((d) => d.subType === subKey);
+        if (subTypeDoc && subTypeDoc.verificationStatus !== "rejected") {
           toast({
             title: "Limit Reached",
             description: `${docConfig.label} - ${subKey === "aadhar" ? "Aadhar Card" : "PAN Card"} has already been uploaded. Only one file is allowed.`,
@@ -259,7 +307,9 @@ export default function UploadDocuments() {
         }
       } else {
         // For other single upload documents
-        if (uploaded && uploaded.length > 0) {
+        // Check if there's a non-rejected document
+        const hasNonRejectedDoc = uploaded?.some((d) => d.verificationStatus !== "rejected");
+        if (uploaded && uploaded.length > 0 && hasNonRejectedDoc) {
           toast({
             title: "Limit Reached",
             description: `${docConfig.label} has already been uploaded. Only one file is allowed.`,
@@ -333,6 +383,9 @@ export default function UploadDocuments() {
 
     try {
       await uploadFiles(docType, filesToUpload, subKey);
+      
+      // Small delay to ensure database is updated
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Reload uploaded documents to get updated list
       await loadUploadedDocuments(id);
@@ -472,6 +525,9 @@ export default function UploadDocuments() {
 
         await uploadFiles(docType, fileList, subKey);
       }
+
+      // Small delay to ensure database is updated
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Reload uploaded documents
       await loadUploadedDocuments(id);
@@ -703,7 +759,9 @@ export default function UploadDocuments() {
                           const uploaded = uploadedDocs[docType.id]?.filter(
                             (d) => d.subType === field.key
                           );
-                          const isAlreadyUploaded = uploaded && uploaded.length > 0;
+                          // Allow re-upload if document is rejected
+                          const hasNonRejectedDoc = uploaded?.some((d) => d.verificationStatus !== "rejected");
+                          const isAlreadyUploaded = uploaded && uploaded.length > 0 && hasNonRejectedDoc;
 
                           return (
                             <div key={field.key} className="space-y-3 pl-4 border-l-2">
@@ -716,18 +774,33 @@ export default function UploadDocuments() {
 
                               {uploaded && uploaded.length > 0 && (
                                 <div className="space-y-2">
-                                  {uploaded.map((doc, idx) => (
-                                    <div
-                                      key={idx}
-                                      className="flex items-center gap-2 text-sm text-green-600"
-                                    >
-                                      <CheckCircle className="h-4 w-4" />
-                                      <span>Uploaded: {doc.fileName}</span>
-                                      <span className="text-muted-foreground">
-                                        ({new Date(doc.uploadedAt).toLocaleString()})
-                                      </span>
-                                    </div>
-                                  ))}
+                                  {uploaded.map((doc, idx) => {
+                                    const isRejected = doc.verificationStatus === "rejected";
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`flex items-center gap-2 text-sm ${isRejected ? "text-red-600" : "text-green-600"}`}
+                                      >
+                                        {isRejected ? (
+                                          <XCircle className="h-4 w-4" />
+                                        ) : (
+                                          <CheckCircle className="h-4 w-4" />
+                                        )}
+                                        <span>
+                                          {isRejected ? "Rejected: " : "Uploaded: "}
+                                          {doc.fileName}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                          ({new Date(doc.uploadedAt).toLocaleString()})
+                                        </span>
+                                        {isRejected && (
+                                          <span className="text-xs text-red-600 font-medium ml-2">
+                                            - Please re-upload
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
 
@@ -768,7 +841,9 @@ export default function UploadDocuments() {
                 // Handle other document types
                 const uploaded = uploadedDocs[docType.id];
                 const allowMultiple = "allowMultiple" in docType && docType.allowMultiple;
-                const isAlreadyUploaded = uploaded && uploaded.length > 0 && !allowMultiple;
+                // Check if there's a non-rejected document (allow re-upload for rejected docs)
+                const hasNonRejectedDoc = uploaded?.some((d) => d.verificationStatus !== "rejected");
+                const isAlreadyUploaded = uploaded && uploaded.length > 0 && hasNonRejectedDoc && !allowMultiple;
 
                 return (
                   <Card key={docType.id} className="border-2">
@@ -788,18 +863,33 @@ export default function UploadDocuments() {
                           )}
                           {uploaded && uploaded.length > 0 && (
                             <div className="mt-2 space-y-1">
-                              {uploaded.map((doc, idx) => (
-                                <div
-                                  key={idx}
-                                  className="flex items-center gap-2 text-sm text-green-600"
-                                >
-                                  <CheckCircle className="h-4 w-4" />
-                                  <span>Uploaded: {doc.fileName}</span>
-                                  <span className="text-muted-foreground">
-                                    ({new Date(doc.uploadedAt).toLocaleString()})
-                                  </span>
-                                </div>
-                              ))}
+                              {uploaded.map((doc, idx) => {
+                                const isRejected = doc.verificationStatus === "rejected";
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`flex items-center gap-2 text-sm ${isRejected ? "text-red-600" : "text-green-600"}`}
+                                  >
+                                    {isRejected ? (
+                                      <XCircle className="h-4 w-4" />
+                                    ) : (
+                                      <CheckCircle className="h-4 w-4" />
+                                    )}
+                                    <span>
+                                      {isRejected ? "Rejected: " : "Uploaded: "}
+                                      {doc.fileName}
+                                    </span>
+                                    <span className="text-muted-foreground">
+                                      ({new Date(doc.uploadedAt).toLocaleString()})
+                                    </span>
+                                    {isRejected && (
+                                      <span className="text-xs text-red-600 font-medium ml-2">
+                                        - Please re-upload
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
