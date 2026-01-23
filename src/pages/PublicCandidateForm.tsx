@@ -4,9 +4,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Upload, CheckCircle, Loader2, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 
 export default function PublicCandidateForm() {
   const { toast } = useToast();
@@ -14,10 +22,26 @@ export default function PublicCandidateForm() {
     name: "",
     email: "",
     phone: "",
+    jobId: "",
+    customJobTitle: "",
   });
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Fetch all jobs for dropdown
+  const { data: jobs = [] } = useQuery({
+    queryKey: ['public-jobs'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('id, job_title')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
   const computeFileHash = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer();
@@ -102,6 +126,28 @@ export default function PublicCandidateForm() {
       toast({
         title: "Resume Required",
         description: "Please upload your resume (PDF file).",
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Validate job selection (required)
+    if (!formData.jobId || formData.jobId === "none") {
+      toast({
+        title: "Job Selection Required",
+        description: "Please select a job position you're applying for.",
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Validate custom job title if "Other" is selected
+    if (formData.jobId === "other" && !formData.customJobTitle.trim()) {
+      toast({
+        title: "Job Title Required",
+        description: "Please enter the job title you're applying for.",
         variant: "destructive",
       });
       setIsSubmitting(false);
@@ -198,6 +244,24 @@ export default function PublicCandidateForm() {
         console.warn("Could not notify event endpoint:", e);
       }
 
+      // Handle custom job title - create job if "other" is selected
+      let finalJobId = formData.jobId;
+      if (formData.jobId === "other" && formData.customJobTitle.trim()) {
+        // Create a new job entry for the custom job title
+        const { data: newJob, error: jobError } = await supabase
+          .from('jobs')
+          .insert({
+            job_title: formData.customJobTitle.trim(),
+          })
+          .select('id')
+          .single();
+        
+        if (jobError) {
+          throw new Error(`Failed to create job: ${jobError.message}`);
+        }
+        finalJobId = newJob.id;
+      }
+
       // Create candidate record
       const { error: insertError } = await supabase
         .from("candidates")
@@ -209,13 +273,31 @@ export default function PublicCandidateForm() {
           resume_url: resumeUrl!,
           resume_hash: resumeHash!,
           resume_processed: false,
-          job_id: null,
+          job_id: finalJobId,
           reference_source: "Public Form",
         });
 
       if (insertError) {
         // Check if it's a duplicate email error
         if (insertError.code === "23505" && insertError.message.includes("email")) {
+          // Handle custom job title for update
+          let finalJobIdForUpdate = formData.jobId;
+          if (formData.jobId === "other" && formData.customJobTitle.trim()) {
+            // Create a new job entry for the custom job title
+            const { data: newJob, error: jobError } = await supabase
+              .from('jobs')
+              .insert({
+                job_title: formData.customJobTitle.trim(),
+              })
+              .select('id')
+              .single();
+            
+            if (jobError) {
+              throw new Error(`Failed to create job: ${jobError.message}`);
+            }
+            finalJobIdForUpdate = newJob.id;
+          }
+
           // Try to update existing candidate
           const { error: updateError } = await supabase
             .from("candidates")
@@ -225,6 +307,7 @@ export default function PublicCandidateForm() {
               resume_url: resumeUrl!,
               resume_hash: resumeHash!,
               resume_processed: false,
+              job_id: finalJobIdForUpdate,
               reference_source: "Public Form",
             })
             .eq("email", formData.email.trim().toLowerCase());
@@ -252,6 +335,8 @@ export default function PublicCandidateForm() {
         name: "",
         email: "",
         phone: "",
+        jobId: "",
+        customJobTitle: "",
       });
       setResumeFile(null);
       setSubmitSuccess(true);
@@ -361,6 +446,56 @@ export default function PublicCandidateForm() {
                     disabled={isSubmitting}
                     className="h-11"
                   />
+                </div>
+
+                {/* Job Applied */}
+                <div className="space-y-2">
+                  <Label htmlFor="job" className="text-gray-700 font-medium">
+                    Job Applied For <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={formData.jobId || undefined}
+                    onValueChange={(value) => setFormData({ ...formData, jobId: value, customJobTitle: value === "other" ? formData.customJobTitle : "" })}
+                    disabled={isSubmitting}
+                    required
+                  >
+                    <SelectTrigger id="job" className="h-11">
+                      <SelectValue placeholder="Select a job position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jobs.map((job: any) => (
+                        <SelectItem key={job.id} value={job.id}>
+                          {job.job_title}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  
+                  {/* Custom Job Title Input - Show when "Other" is selected */}
+                  {formData.jobId === "other" && (
+                    <div className="mt-3">
+                      <Label htmlFor="customJobTitle" className="text-gray-700 font-medium">
+                        Enter Job Title <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        id="customJobTitle"
+                        type="text"
+                        placeholder="Enter the job title you're applying for"
+                        value={formData.customJobTitle}
+                        onChange={(e) => setFormData({ ...formData, customJobTitle: e.target.value })}
+                        required
+                        disabled={isSubmitting}
+                        className="h-11 mt-2"
+                      />
+                    </div>
+                  )}
+                  
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formData.jobId === "other" 
+                      ? "Please enter the job title you're applying for"
+                      : "Please select the job position you're applying for"}
+                  </p>
                 </div>
 
                 {/* Resume Upload */}
