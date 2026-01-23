@@ -3,6 +3,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getRoleDisplayName } from "@/lib/roles";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -12,7 +13,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const { hrUser, logout, loading } = useAuth();
   const isMobile = useIsMobile();
 
-  const initials = "HR";
+  const roleDisplayName = getRoleDisplayName(hrUser);
+  const initials = roleDisplayName === 'Admin' ? 'AD' : 'HR';
 
   return (
     <header className="fixed top-0 left-0 right-0 h-16 bg-card border-b border-border shadow-sm z-50">
@@ -43,7 +45,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
               {hrUser?.name ?? "HR Admin"}
             </p>
             <p className="hidden sm:block text-xs text-muted-foreground truncate max-w-[180px]">
-              {hrUser?.email ?? "hr@company.com"}
+              {hrUser?.email ?? "hr@company.com"} • {roleDisplayName}
             </p>
           </div>
           <Avatar className="h-9 w-9 sm:h-10 sm:w-10 border-2 border-primary">

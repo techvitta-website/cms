@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserPlus } from "lucide-react";
+import { UserPlus, Pencil, KeyRound } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,10 +30,21 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
+import { canResetPassword, isAdmin } from "@/lib/roles";
 
 export default function HRUsers() {
+  const { hrUser: currentUser } = useAuth();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
+  const [resettingUser, setResettingUser] = useState<any>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
   const [role, setRole] = useState("");
+  const [editRole, setEditRole] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -162,11 +173,154 @@ export default function HRUsers() {
     }
   };
 
-  const getRoleBadge = (role: string) => {
-    if (role === "Admin") return <Badge className="bg-primary text-primary-foreground">{role}</Badge>;
-    if (role === "Manager") return <Badge className="bg-success text-success-foreground">{role}</Badge>;
-    return <Badge variant="secondary">{role}</Badge>;
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    const formData = new FormData(e.target as HTMLFormElement);
+    const name = formData.get('edit-name') as string;
+    const email = formData.get('edit-email') as string;
+    const selectedRole = editRole || editingUser.role || 'hr';
+
+    if (!name || !email || !selectedRole) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Update hr_users record
+      const { error: updateError } = await supabase
+        .from('hr_users')
+        .update({
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          role: selectedRole,
+        })
+        .eq('id', editingUser.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Update auth user metadata if email changed
+      if (email.trim().toLowerCase() !== editingUser.email) {
+        // Note: Email change in auth requires admin privileges or special handling
+        // For now, we'll just update the hr_users table
+        console.log('Email changed - auth update may be required');
+      }
+
+      toast({
+        title: "HR member updated successfully!",
+        description: "The team member's information has been updated.",
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['hr-users'] });
+      setEditOpen(false);
+      setEditingUser(null);
+      setEditRole("");
+      
+      // Reset form
+      (e.target as HTMLFormElement).reset();
+    } catch (error: any) {
+      toast({
+        title: "Error updating HR member",
+        description: error.message || "Failed to update HR member. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
+
+  const handleOpenEdit = (user: any) => {
+    setEditingUser(user);
+    setEditRole(user.role || 'hr');
+    setEditOpen(true);
+  };
+
+  // Password reset handler (Admin only, for HR role users)
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resettingUser) return;
+
+    if (!newPassword || !confirmPassword) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in both password fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast({
+        title: "Password Too Short",
+        description: "Password must be at least 6 characters long.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Passwords Don't Match",
+        description: "New password and confirm password must match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setResetting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('reset-hr-password', {
+        body: {
+          userId: resettingUser.id,
+          newPassword: newPassword,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to reset password');
+      }
+
+      toast({
+        title: "Password Reset Successful",
+        description: `Password has been reset for ${resettingUser.name}.`,
+      });
+
+      setResetPasswordOpen(false);
+      setResettingUser(null);
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (error: any) {
+      toast({
+        title: "Password Reset Failed",
+        description: error.message || "Failed to reset password. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleOpenResetPassword = (user: any) => {
+    setResettingUser(user);
+    setResetPasswordOpen(true);
+  };
+
+  const getRoleBadge = (role: string) => {
+    if (role === "admin") return <Badge className="bg-primary text-primary-foreground">Admin</Badge>;
+    return <Badge variant="secondary">{role || 'hr'}</Badge>;
+  };
+
+  const canReset = canResetPassword(currentUser); // Only admin can reset
+  const canAddHR = isAdmin(currentUser); // Only admin can add HR members
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -176,13 +330,14 @@ export default function HRUsers() {
           <p className="text-muted-foreground mt-1">Manage your HR department users and permissions</p>
         </div>
         
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md">
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add HR Member
-            </Button>
-          </DialogTrigger>
+        {canAddHR && (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add HR Member
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
               <DialogTitle className="text-xl">Add New HR Member</DialogTitle>
@@ -211,8 +366,7 @@ export default function HRUsers() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="recruiter">Recruiter</SelectItem>
+                    <SelectItem value="hr">HR</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -226,6 +380,7 @@ export default function HRUsers() {
             </form>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
       <Card className="shadow-md">
@@ -241,12 +396,13 @@ export default function HRUsers() {
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead className="text-right">Created Date</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {hrUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
                     No HR users found
                   </TableCell>
                 </TableRow>
@@ -263,6 +419,31 @@ export default function HRUsers() {
                         day: 'numeric'
                       })}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenEdit(user)}
+                          className="h-8 w-8 p-0"
+                          title="Edit User"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        {/* Password Reset Button - Only for Admin, only for HR role users */}
+                        {canReset && user.role?.toLowerCase() === 'hr' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenResetPassword(user)}
+                            className="h-8 w-8 p-0"
+                            title="Reset Password"
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -270,6 +451,147 @@ export default function HRUsers() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Edit HR User Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Edit HR Member</DialogTitle>
+          </DialogHeader>
+          {editingUser && (
+            <form onSubmit={handleEditUser} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Full Name</Label>
+                <Input 
+                  id="edit-name" 
+                  name="edit-name" 
+                  placeholder="John Doe" 
+                  defaultValue={editingUser.name}
+                  required 
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input 
+                  id="edit-email" 
+                  name="edit-email" 
+                  type="email" 
+                  placeholder="john.doe@company.com" 
+                  defaultValue={editingUser.email}
+                  required 
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-role">Role</Label>
+                <Select value={editRole} onValueChange={setEditRole} required>
+                  <SelectTrigger id="edit-role">
+                    <SelectValue placeholder="Select a role..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="hr">HR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditOpen(false);
+                    setEditingUser(null);
+                    setEditRole("");
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md flex-1"
+                >
+                  Update Member
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Password Reset Dialog - Only visible to Admin, only for HR role users */}
+      {canReset && (
+        <Dialog open={resetPasswordOpen} onOpenChange={setResetPasswordOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="text-xl">Reset Password</DialogTitle>
+            </DialogHeader>
+            {resettingUser && (
+              <form onSubmit={handleResetPassword} className="space-y-6">
+                <div className="p-4 bg-muted rounded-lg">
+                  <p className="text-sm font-medium">Resetting password for:</p>
+                  <p className="text-lg font-semibold">{resettingUser.name}</p>
+                  <p className="text-sm text-muted-foreground">{resettingUser.email}</p>
+                  <Badge variant="secondary" className="mt-2">{resettingUser.role || 'hr'}</Badge>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New Password</Label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    placeholder="Enter new password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                  <p className="text-xs text-muted-foreground">Minimum 6 characters</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm Password</Label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    placeholder="Confirm new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setResetPasswordOpen(false);
+                      setResettingUser(null);
+                      setNewPassword("");
+                      setConfirmPassword("");
+                    }}
+                    className="flex-1"
+                    disabled={resetting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md flex-1"
+                    disabled={resetting}
+                  >
+                    {resetting ? "Resetting..." : "Reset Password"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

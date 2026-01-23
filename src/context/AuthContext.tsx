@@ -22,7 +22,7 @@ const fetchHrUser = async (userEmail: string) => {
     .from("hr_users")
     .select("*")
     .eq("email", userEmail)
-    .eq("role", "hr")
+    // Removed .eq("role", "hr") to allow admin and hr roles
     .maybeSingle();
 
   if (error) {
@@ -121,7 +121,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const { data: hrProfile } = await fetchHrUser(email);
       if (!hrProfile) {
         await supabase.auth.signOut();
-        return { success: false, error: "Access denied. HR role required." };
+        return { success: false, error: "Access denied. User not found in HR system." };
       }
 
       setSession(data.session);

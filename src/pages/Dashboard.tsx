@@ -22,6 +22,7 @@ import {
   Clock,
   Loader2,
   ShieldCheck,
+  Copy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -3793,6 +3794,44 @@ export default function Dashboard() {
               {uploadingResume ? "Adding..." : "Add Candidate"}
             </Button>
           </DialogFooter>
+          <div className="pt-4 border-t border-gray-200 mt-4 px-6 pb-4">
+            <div className="flex items-center justify-center gap-2">
+              <p className="text-xs text-muted-foreground">
+                Share public form:{" "}
+                <a 
+                  href="https://cms.techvitta.in/apply" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-700 underline font-mono"
+                >
+                  https://cms.techvitta.in/apply
+                </a>
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText("https://cms.techvitta.in/apply");
+                    toast({
+                      title: "Link Copied!",
+                      description: "Public form link has been copied to clipboard.",
+                    });
+                  } catch (err) {
+                    toast({
+                      title: "Copy Failed",
+                      description: "Failed to copy link. Please try again.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+                title="Copy link"
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

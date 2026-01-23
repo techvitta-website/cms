@@ -12,7 +12,7 @@ DROP POLICY IF EXISTS "Allow anon read candidate-documents" ON storage.objects;
 
 -- Step 3: Create policy with ABSOLUTELY NO restrictions
 -- This is the simplest possible policy - just checks bucket name
-CREATE POLICY "Allow anon upload to candidate-documents"
+//CREATE POLICY "Allow anon upload to candidate-documents"
 ON storage.objects
 FOR INSERT
 TO anon
