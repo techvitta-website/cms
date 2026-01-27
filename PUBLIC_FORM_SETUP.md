@@ -123,3 +123,5 @@ If you encounter issues:
 3. Check RLS policies are active
 4. Ensure storage buckets are configured
 
+
+
