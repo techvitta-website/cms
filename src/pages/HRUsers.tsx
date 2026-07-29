@@ -52,9 +52,11 @@ export default function HRUsers() {
   const { data: hrUsers = [] } = useQuery({
     queryKey: ['hr-users'],
     queryFn: async () => {
+      // Named columns only — never select('*') here: hr_users has a legacy
+      // password column that must not be shipped to the browser.
       const { data, error } = await supabase
         .from('hr_users')
-        .select('*')
+        .select('id, name, email, role, created_at')
         .order('created_at', { ascending: false });
       
       if (error) throw error;
@@ -321,6 +323,7 @@ export default function HRUsers() {
 
   const canReset = canResetPassword(currentUser); // Only admin can reset
   const canAddHR = isAdmin(currentUser); // Only admin can add HR members
+  const userIsAdmin = isAdmin(currentUser); // Only admin can edit users/roles
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -421,15 +424,20 @@ export default function HRUsers() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEdit(user)}
-                          className="h-8 w-8 p-0"
-                          title="Edit User"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        {/* Editing users (incl. role changes) is admin-only.
+                            This was unconditional, which let an HR user open
+                            the dialog and set their own role to admin. */}
+                        {userIsAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenEdit(user)}
+                            className="h-8 w-8 p-0"
+                            title="Edit User"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
                         {/* Password Reset Button - Only for Admin, only for HR role users */}
                         {canReset && user.role?.toLowerCase() === 'hr' && (
                           <Button

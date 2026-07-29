@@ -4,6 +4,8 @@ import Sidebar, { menuItems } from "./Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { isAdmin } from "@/lib/roles";
 
 interface LayoutProps {
   children: ReactNode;
@@ -12,6 +14,12 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { hrUser } = useAuth();
+  // Same filter as the desktop sidebar: admin-only links stay out of
+  // non-admin menus (the route guard enforces it either way).
+  const visibleItems = menuItems.filter(
+    (item) => !("adminOnly" in item && item.adminOnly) || isAdmin(hrUser)
+  );
 
   const handleToggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -33,7 +41,7 @@ export default function Layout({ children }: LayoutProps) {
         <div className="fixed inset-0 z-40 flex md:hidden">
           <div className="w-72 max-w-[80vw] bg-card border-r border-border shadow-lg pt-16">
             <nav className="flex flex-col gap-1 p-4 overflow-y-auto">
-              {menuItems.map((item) => (
+              {visibleItems.map((item) => (
                 <NavLink
                   key={item.path}
                   to={item.path}

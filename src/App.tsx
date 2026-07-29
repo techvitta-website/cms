@@ -1499,7 +1499,7 @@ const App = () => (
             <Route
               path="/hr-users"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute adminOnly>
                   <Layout>
                     <HRUsers />
                   </Layout>
