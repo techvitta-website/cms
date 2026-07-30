@@ -26,7 +26,9 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
   GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest",
-  RESEND_API_KEY: Deno.env.get("RESEND_API_KEY") ?? "",
+  // Prefer a dedicated inbound key (the Resend account that owns the receiving
+  // address) and fall back to the team's sending key.
+  RESEND_API_KEY: Deno.env.get("RESEND_INBOUND_API_KEY") ?? Deno.env.get("RESEND_API_KEY") ?? "",
   RESEND_BASE: Deno.env.get("RESEND_BASE") ?? "https://api.resend.com",
   RESEND_WEBHOOK_SECRET: Deno.env.get("RESEND_WEBHOOK_SECRET") ?? "",
   INTAKE_BATCH: Deno.env.get("INTAKE_BATCH") ?? "Email intake",
@@ -267,7 +269,11 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function attachmentBytes(emailId: string | null, att: RawAttachment): Promise<Uint8Array | null> {
+async function attachmentBytes(
+  supabase: ReturnType<typeof getAdminClient>,
+  emailId: string | null,
+  att: RawAttachment,
+): Promise<Uint8Array | null> {
   // 1) Inline content / direct URL (hand-built test payloads or other providers).
   try {
     if (att.content) return base64ToBytes(att.content);
@@ -281,6 +287,9 @@ async function attachmentBytes(emailId: string | null, att: RawAttachment): Prom
 
   // 2) Resend: fetch a signed download_url from the Received Emails API, then
   //    download the file bytes from it.
+  const dbg = (msg: string) => {
+    supabase.from("activity_logs").insert({ action: "EMAIL_INTAKE_DEBUG", details: `dl: ${msg}`.slice(0, 1500) }).then(() => {}, () => {});
+  };
   if (emailId && att.id && ENV.RESEND_API_KEY) {
     try {
       const metaResp = await fetch(
@@ -292,12 +301,21 @@ async function attachmentBytes(emailId: string | null, att: RawAttachment): Prom
         const dl = meta?.download_url as string | undefined;
         if (dl) {
           const fileResp = await fetch(dl);
+          dbg(`meta=200 download_url=present file=${fileResp.status}`);
           if (fileResp.ok) return new Uint8Array(await fileResp.arrayBuffer());
+        } else {
+          dbg(`meta=200 download_url=MISSING keys=${Object.keys(meta ?? {}).join(",")}`);
         }
+      } else {
+        const body = await metaResp.text().catch(() => "");
+        dbg(`meta=${metaResp.status} body=${body.slice(0, 200)}`);
       }
-    } catch (_err) {
+    } catch (err) {
+      dbg(`threw ${String(err).slice(0, 200)}`);
       return null;
     }
+  } else {
+    dbg(`skipped emailId=${Boolean(emailId)} attId=${Boolean(att.id)} key=${Boolean(ENV.RESEND_API_KEY)}`);
   }
   return null;
 }
@@ -328,6 +346,22 @@ Deno.serve(async (req) => {
     if (url.pathname.endsWith("/health")) {
       return jsonResponse({ ok: true, service: "intern-email-intake", gemini: Boolean(ENV.GEMINI_API_KEY), resend: Boolean(ENV.RESEND_API_KEY) });
     }
+    // Diagnostic: can the stored RESEND_API_KEY see this account's inbound emails?
+    if (url.pathname.endsWith("/diag")) {
+      if (!ENV.RESEND_API_KEY) return jsonResponse({ ok: false, error: "no RESEND_API_KEY" });
+      const r = await fetch(`${ENV.RESEND_BASE}/emails/receiving?limit=5`, {
+        headers: { Authorization: `Bearer ${ENV.RESEND_API_KEY}` },
+      });
+      const body = await r.json().catch(() => ({}));
+      const items = Array.isArray((body as any)?.data) ? (body as any).data : [];
+      return jsonResponse({
+        ok: r.ok,
+        status: r.status,
+        inboundCount: items.length,
+        inbound: items.map((e: any) => ({ id: e?.id, from: e?.from, subject: e?.subject, attachments: (e?.attachments ?? []).length })),
+        raw: r.ok ? undefined : body,
+      });
+    }
     if (req.method !== "POST") {
       return jsonResponse({ ok: true, message: "intern-email-intake online. POST a Resend inbound webhook." });
     }
@@ -346,22 +380,48 @@ Deno.serve(async (req) => {
     const fromEmail: string | null = (data?.from ?? null) && String(data.from).toLowerCase();
     const subject: string = data?.subject ?? "";
 
-    const attachments = collectAttachments(payload).filter(isPdf);
+    const supabase = getAdminClient();
+    const allAtts = collectAttachments(payload);
+    const attachments = allAtts.filter(isPdf);
+
+    // Diagnostic: record exactly what the webhook delivered.
+    try {
+      await supabase.from("activity_logs").insert({
+        action: "EMAIL_INTAKE_DEBUG",
+        details: JSON.stringify({
+          email_id: emailId,
+          from: fromEmail,
+          subject,
+          attachments: allAtts.map((a) => ({
+            id: a.id,
+            filename: a.filename,
+            content_type: a.content_type ?? a.contentType,
+            hasContent: Boolean(a.content),
+            hasUrl: Boolean(a.url),
+          })),
+        }).slice(0, 2000),
+      });
+    } catch (_e) { /* ignore */ }
+
     if (attachments.length === 0) {
       // Not an error — just nothing to screen (keeps Resend from retrying).
       return jsonResponse({ ok: true, screened: 0, note: "No PDF attachments in this email." });
     }
-
-    const supabase = getAdminClient();
     const results: Json[] = [];
     let index = 0;
     for (const att of attachments) {
       index++;
       const filename = att.filename ?? `resume_${index}.pdf`;
       try {
-        const bytes = await attachmentBytes(emailId, att);
+        const bytes = await attachmentBytes(supabase, emailId, att);
         if (!bytes || bytes.length < 100) {
-          results.push({ filename, ok: false, error: "empty attachment" });
+          try {
+            await supabase.from("activity_logs").insert({
+              action: "EMAIL_INTAKE_DEBUG",
+              details: `download failed: file=${filename} att_id=${att.id} email_id=${emailId} bytes=${bytes?.length ?? 0}`,
+            });
+          } catch (_e) { /* ignore */ }
+          results.push({ filename, ok: false, error: "empty or undownloadable attachment" });
           continue;
         }
         const resumeUrl = await uploadResume(supabase, bytes, filename, index);
