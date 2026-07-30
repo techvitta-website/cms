@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { extractTextFromPDFFile, extractTextFromSupabaseStorage } from "@/lib/pdfExtractor";
 
 // Where intern posts come from. Additive tags stored on candidates.source_portal
 // and candidates.reference_source so legacy pages keep working unchanged.
@@ -218,7 +219,7 @@ export default function InternScreening() {
     }
     setUploading(true);
     const batch = batchName.trim();
-    const createdIds: string[] = [];
+    const createdItems: { candidateId: string; resumeText: string; fileName: string }[] = [];
     try {
       // 1) Record the batch (best-effort; screening still proceeds if this fails).
       try {
@@ -242,6 +243,13 @@ export default function InternScreening() {
         setProgress(`Uploading ${done + 1} / ${files.length}: ${file.name}`);
         try {
           const resumeUrl = await uploadOne(file, i);
+          // Extract the PDF text in the browser (no server-side PDF library needed).
+          let resumeText = "";
+          try {
+            resumeText = await extractTextFromPDFFile(file);
+          } catch (err) {
+            console.warn(`Text extraction failed for ${file.name}:`, err);
+          }
           const { data, error } = await supabase
             .from("candidates")
             .insert({
@@ -256,7 +264,9 @@ export default function InternScreening() {
             .select("id")
             .single();
           if (error) throw error;
-          if (data?.id) createdIds.push(data.id);
+          if (data?.id) {
+            createdItems.push({ candidateId: data.id, resumeText, fileName: file.name });
+          }
         } catch (err: any) {
           console.warn(`Failed to upload/create ${file.name}:`, err);
           toast({
@@ -268,18 +278,17 @@ export default function InternScreening() {
         done++;
       }
 
-      if (createdIds.length === 0) {
+      if (createdItems.length === 0) {
         toast({ title: "Nothing uploaded", description: "No resumes were saved.", variant: "destructive" });
         return;
       }
 
-      // 3) Kick off AI screening for the new candidates.
-      setProgress(`Screening ${createdIds.length} resume(s) with AI…`);
+      // 3) Kick off AI screening for the new candidates (send extracted text).
+      setProgress(`Screening ${createdItems.length} resume(s) with AI…`);
       const { data: screenData, error: screenError } = await supabase.functions.invoke("intern-screen", {
         body: {
-          candidateIds: createdIds,
+          candidates: createdItems,
           targetSkills: effectiveTargetSkills,
-          targetRole: jobs.find((j: any) => String(j.id) === targetJobId)?.job_title ?? null,
         },
       });
 
@@ -291,10 +300,10 @@ export default function InternScreening() {
           variant: "destructive",
         });
       } else {
-        const screened = (screenData as any)?.screened ?? createdIds.length;
+        const screened = (screenData as any)?.screened ?? createdItems.length;
         toast({
           title: "Batch screened",
-          description: `${screened} of ${createdIds.length} resume(s) scored and ranked.`,
+          description: `${screened} of ${createdItems.length} resume(s) scored and ranked.`,
         });
       }
 
@@ -316,16 +325,32 @@ export default function InternScreening() {
   };
 
   const handleRescore = async () => {
-    const ids = filtered.map((c) => c.id);
-    if (ids.length === 0) return;
+    const targets = filtered.filter((c) => c.resume_url);
+    if (targets.length === 0) return;
     setUploading(true);
-    setProgress(`Re-scoring ${ids.length} candidate(s)…`);
+    setProgress(`Re-scoring ${targets.length} candidate(s)…`);
     try {
+      // Re-read each resume's text in the browser, then send to the function.
+      const payload: { candidateId: string; resumeText: string; fileName: string }[] = [];
+      for (let i = 0; i < targets.length; i++) {
+        const c = targets[i];
+        setProgress(`Reading ${i + 1} / ${targets.length}…`);
+        let resumeText = "";
+        try {
+          const [bucket, ...rest] = (c.resume_url as string).split("/");
+          const fileName = rest.join("/");
+          resumeText = await extractTextFromSupabaseStorage(supabase, bucket, fileName);
+        } catch (err) {
+          console.warn("Re-score text extraction failed:", err);
+        }
+        payload.push({ candidateId: c.id, resumeText, fileName: c.resume_url || "" });
+      }
+      setProgress(`Scoring ${payload.length} candidate(s)…`);
       const { error } = await supabase.functions.invoke("intern-screen", {
-        body: { candidateIds: ids, targetSkills: effectiveTargetSkills },
+        body: { candidates: payload, targetSkills: effectiveTargetSkills },
       });
       if (error) throw error;
-      toast({ title: "Re-scored", description: `${ids.length} candidate(s) updated.` });
+      toast({ title: "Re-scored", description: `${payload.length} candidate(s) updated.` });
       await queryClient.invalidateQueries({ queryKey: ["intern-candidates"] });
       await refetch();
     } catch (err: any) {

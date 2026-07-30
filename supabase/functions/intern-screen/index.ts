@@ -1,25 +1,20 @@
 // Supabase Edge Function: intern-screen
 // ADDITIVE, self-contained. Does NOT touch ats-processor.
 //
-// Purpose: score already-uploaded intern resumes for the CMS "Intern Screening"
-// page. Given a list of candidate ids, it downloads each resume from storage,
-// extracts text, parses intern-specific fields (college, degree, branch,
-// graduation year, CGPA, projects, certifications, skills) with GPT-4o-mini
-// (heuristic fallback when no key / on failure), computes a weighted intern
-// score against an optional target skill set, and writes the screening fields
-// back onto the candidate row. Low scorers are flagged for review — this
-// function never rejects anyone and never changes a candidate's status.
+// PDF text is extracted in the browser (the CMS already does this) and sent to
+// this function, so there is NO pdf library here — it bundles cleanly. Given a
+// list of { candidateId, resumeText }, it parses intern-specific fields
+// (college, degree, branch, graduation year, CGPA, projects, certifications,
+// skills) with GPT-4o-mini (heuristic fallback when no key / on failure),
+// computes a weighted intern score against an optional target skill set, and
+// writes the screening fields back onto the candidate row. Low scorers are
+// flagged for review — this function never rejects anyone and never changes a
+// candidate's status.
 //
-// Endpoints:
-//   GET  /health                      -> { ok, openai }
-//   POST /                            -> body { candidateIds: string[], targetSkills?: string[], targetRole?: string }
-//                                        (also accepts { candidateId: string })
+// POST body:
+//   { candidates: [{ candidateId, resumeText, fileName? }], targetSkills?: string[] }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.3";
-
-// pdfjs-dist for Deno via esm.sh (worker disabled in Edge runtime)
-// deno-lint-ignore no-explicit-any
-const pdfjsLib: any = await import("https://esm.sh/pdfjs-dist@3.11.174/legacy/build/pdf.mjs?external=canvas");
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -33,10 +28,6 @@ const ENV = {
   SUPABASE_URL: Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY") ?? "",
-  RESUMES_BUCKET:
-    Deno.env.get("RESUMES_BUCKET") ??
-    Deno.env.get("SUPABASE_RESUMES_BUCKET") ??
-    "resumes-private",
 };
 
 type InternExtraction = {
@@ -86,80 +77,11 @@ function cleanList(items: unknown, max = 25): string[] {
   return out;
 }
 
-async function safeJson<T = unknown>(text: string): Promise<T | null> {
+function safeJson<T = unknown>(text: string): T | null {
   try {
     return JSON.parse(text) as T;
   } catch {
     return null;
-  }
-}
-
-function candidateBuckets(...overrides: Array<string | null | undefined>): string[] {
-  const buckets = new Set<string>();
-  for (const value of overrides) {
-    const trimmed = (value ?? "").trim();
-    if (trimmed.length > 0) buckets.add(trimmed);
-  }
-  buckets.add(ENV.RESUMES_BUCKET);
-  buckets.add("resumes-private");
-  buckets.add("resumes");
-  return Array.from(buckets);
-}
-
-// Split a stored resume_url like "resumes-private/1699_abc.pdf" into bucket + key.
-function splitResumeUrl(resumeUrl: string): { bucket: string | null; key: string } {
-  let path = (resumeUrl || "").trim();
-  path = path.replace(/^https?:\/\/[^/]+\//i, "");
-  path = path.replace(/^storage\/v1\/object\//i, "");
-  path = path.replace(/^(public|sign|download)\//i, "");
-  path = path.replace(/^\//, "");
-  const parts = path.split("/");
-  if (parts.length >= 2 && (parts[0] === "resumes" || parts[0] === "resumes-private")) {
-    return { bucket: parts[0], key: parts.slice(1).join("/") };
-  }
-  return { bucket: null, key: path };
-}
-
-async function downloadResumeBytes(
-  supabase: ReturnType<typeof createClient>,
-  resumeUrl: string,
-): Promise<Uint8Array | null> {
-  const { bucket, key } = splitResumeUrl(resumeUrl);
-  const buckets = candidateBuckets(bucket);
-  const fileName = key.includes("/") ? key.split("/").pop()! : key;
-  for (const b of buckets) {
-    for (const candidateKey of [key, fileName]) {
-      const { data, error } = await supabase.storage.from(b).download(candidateKey);
-      if (!error && data) {
-        return new Uint8Array(await data.arrayBuffer());
-      }
-    }
-  }
-  return null;
-}
-
-// Extract PDF text from bytes without a worker in Edge (same approach as ats-processor).
-async function extractPdfTextFromBytes(bytes: Uint8Array): Promise<string> {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = undefined;
-    const loadingTask = pdfjsLib.getDocument({ data: bytes, isEvalSupported: false });
-    const pdf = await loadingTask.promise;
-    let text = "";
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const content = await page.getTextContent();
-      const pageText = content.items.map((it: { str: string }) => it.str).join(" ");
-      text += pageText + "\n\n";
-    }
-    return text.trim();
-  } catch (_err) {
-    try {
-      const decoder = new TextDecoder("utf-8", { fatal: false });
-      const decoded = decoder.decode(bytes);
-      return decoded.replace(/\x00/g, "").slice(0, 200000);
-    } catch {
-      throw _err;
-    }
   }
 }
 
@@ -214,7 +136,7 @@ function localHeuristicIntern(resumeText: string, fileName: string): InternExtra
   const certMatches = resumeText.match(/(certified|certification|certificate)[^\n]{0,80}/gi) ?? [];
   const certifications = cleanList(certMatches.slice(0, 8));
 
-  const nameFromFile = fileName
+  const nameFromFile = (fileName || "")
     .replace(/\.(pdf|docx?)$/i, "")
     .replace(/^\d+[_-]?\d*[_-]?\d*[_-]?/, "")
     .replace(/[_-]+/g, " ")
@@ -289,7 +211,7 @@ ${resumeText.slice(0, 30000)}`;
       if (!resp.ok) throw new Error(`OpenAI ${resp.status}`);
       const data = await resp.json();
       const jsonText: string = data.choices?.[0]?.message?.content ?? "";
-      const parsed = await safeJson<Record<string, unknown>>(jsonText);
+      const parsed = safeJson<Record<string, unknown>>(jsonText);
       if (!parsed) throw new Error("Invalid JSON from model");
       const gy = Number(parsed.graduation_year);
       const cg = Number(parsed.cgpa);
@@ -392,32 +314,30 @@ function computeInternScore(fields: InternExtraction, targetSkills: string[]): S
   return { score, tier, rationale, flags };
 }
 
-async function screenCandidate(
-  supabase: ReturnType<typeof createClient>,
-  candidateId: string,
+async function screenOne(
+  supabase: ReturnType<typeof getAdminClient>,
+  item: { candidateId: string; resumeText: string; fileName?: string },
   targetSkills: string[],
 ): Promise<Json> {
-  const { data: candidate, error } = await supabase
+  const candidateId = item.candidateId;
+  const resumeText = String(item.resumeText ?? "");
+  if (!candidateId) return { candidateId, ok: false, error: "missing candidateId" };
+  if (resumeText.trim().length < 10) {
+    return { candidateId, ok: false, error: "empty or unreadable resume text" };
+  }
+
+  // Read current identity so we never overwrite good data.
+  const { data: candidate } = await supabase
     .from("candidates")
-    .select("id, full_name, email, phone, resume_url, skills")
+    .select("id, full_name, email, phone, skills")
     .eq("id", candidateId)
     .maybeSingle();
-  if (error) throw error;
-  if (!candidate) return { candidateId, ok: false, error: "candidate not found" };
-  if (!candidate.resume_url) return { candidateId, ok: false, error: "no resume_url" };
 
-  const bytes = await downloadResumeBytes(supabase, candidate.resume_url);
-  if (!bytes) return { candidateId, ok: false, error: "resume download failed" };
-
-  const fileName = candidate.resume_url.split("/").pop() ?? "";
-  const text = await extractPdfTextFromBytes(bytes);
-  const ai = await callOpenAIIntern(text);
-  const fields = ai ?? localHeuristicIntern(text, fileName);
-
+  const ai = await callOpenAIIntern(resumeText);
+  const fields = ai ?? localHeuristicIntern(resumeText, item.fileName ?? "");
   const scored = computeInternScore(fields, targetSkills);
 
-  // Merge skills: keep whatever was already on the row, add parsed ones.
-  const existingSkills = Array.isArray(candidate.skills) ? (candidate.skills as string[]) : [];
+  const existingSkills = Array.isArray(candidate?.skills) ? (candidate!.skills as string[]) : [];
   const mergedSkills = normalizeSkills([...existingSkills, ...fields.skills]);
 
   const update: Record<string, unknown> = {
@@ -435,14 +355,13 @@ async function screenCandidate(
     screening_tier: scored.tier,
     screening_rationale: scored.rationale,
     intern_flags: scored.flags,
-    resume_text: text.slice(0, 20000),
+    resume_text: resumeText.slice(0, 20000),
     resume_processed: true,
     screened_at: new Date().toISOString(),
   };
-  // Only fill identity fields if the row is missing them (never overwrite good data).
-  if (!candidate.full_name && fields.name) update.full_name = fields.name;
-  if (!candidate.email && fields.email) update.email = fields.email;
-  if (!candidate.phone && fields.phone) update.phone = fields.phone;
+  if (!candidate?.full_name && fields.name) update.full_name = fields.name;
+  if (!candidate?.email && fields.email) update.email = fields.email;
+  if (!candidate?.phone && fields.phone) update.phone = fields.phone;
 
   const { error: upErr } = await supabase.from("candidates").update(update).eq("id", candidateId);
   if (upErr) throw upErr;
@@ -476,37 +395,42 @@ Deno.serve(async (req) => {
     }
 
     if (req.method !== "POST") {
-      return jsonResponse({ ok: true, message: "intern-screen online. POST { candidateIds, targetSkills? }" });
+      return jsonResponse({ ok: true, message: "intern-screen online. POST { candidates:[{candidateId,resumeText}], targetSkills? }" });
     }
 
     const payload = await req.json().catch(() => ({}));
-    const ids: string[] = Array.isArray(payload?.candidateIds)
-      ? payload.candidateIds.map(String)
-      : payload?.candidateId
-      ? [String(payload.candidateId)]
+    const rawItems: any[] = Array.isArray(payload?.candidates)
+      ? payload.candidates
+      : payload?.candidateId && payload?.resumeText
+      ? [{ candidateId: payload.candidateId, resumeText: payload.resumeText, fileName: payload.fileName }]
       : [];
     const targetSkills: string[] = Array.isArray(payload?.targetSkills)
       ? payload.targetSkills.map((s: unknown) => String(s))
       : [];
 
-    if (ids.length === 0) {
-      return jsonResponse({ ok: false, error: "candidateIds is required" }, 400);
+    if (rawItems.length === 0) {
+      return jsonResponse({ ok: false, error: "candidates array is required" }, 400);
     }
 
     const supabase = getAdminClient();
     const results: Json[] = [];
     const errors: string[] = [];
-    for (const id of ids) {
+    for (const raw of rawItems) {
+      const item = {
+        candidateId: String(raw?.candidateId ?? ""),
+        resumeText: String(raw?.resumeText ?? ""),
+        fileName: raw?.fileName ? String(raw.fileName) : undefined,
+      };
       try {
-        results.push(await screenCandidate(supabase, id, targetSkills));
+        results.push(await screenOne(supabase, item, targetSkills));
       } catch (err) {
-        errors.push(`${id}: ${String(err)}`);
-        results.push({ candidateId: id, ok: false, error: String(err) });
+        errors.push(`${item.candidateId}: ${String(err)}`);
+        results.push({ candidateId: item.candidateId, ok: false, error: String(err) });
       }
     }
 
     const scored = results.filter((r: any) => r?.ok).length;
-    return jsonResponse({ ok: true, screened: scored, total: ids.length, errors, results });
+    return jsonResponse({ ok: true, screened: scored, total: rawItems.length, errors, results });
   } catch (err) {
     return jsonResponse({ ok: false, error: String(err) }, 500);
   }
