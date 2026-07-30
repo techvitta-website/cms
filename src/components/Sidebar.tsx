@@ -1,4 +1,4 @@
-import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award, ShieldCheck, Archive, GraduationCap } from "lucide-react";
+import { Home, FileText, Briefcase, Brain, Users, ScrollText, ClipboardList, Calendar, MessageSquare, FileCheck, Award, ShieldCheck, Archive, GraduationCap, Radar } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
@@ -10,6 +10,7 @@ export const menuItems = [
   // { icon: FileText, label: "Resumes", path: "/resumes" },
   { icon: Briefcase, label: "Recruitment Hub", path: "/recruitment-hub" },
   { icon: GraduationCap, label: "Intern Screening", path: "/intern-screening" },
+  { icon: Radar, label: "Source Interns", path: "/intern-sourcing" },
   { icon: ClipboardList, label: "Shortlist", path: "/shortlist" },
   { icon: Calendar, label: "Interview", path: "/interview" },
   { icon: MessageSquare, label: "Feedback", path: "/feedback" },

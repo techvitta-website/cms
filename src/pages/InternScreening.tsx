@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { extractTextFromPDFFile, extractTextFromSupabaseStorage } from "@/lib/pdfExtractor";
+import JSZip from "jszip";
 
 // Where intern posts come from. Additive tags stored on candidates.source_portal
 // and candidates.reference_source so legacy pages keep working unchanged.
@@ -194,6 +195,38 @@ export default function InternScreening() {
     });
   }, [candidates, query, batchFilter, tierFilter, statusFilter, minScore]);
 
+  // Expand the selected files into a flat list of PDFs, unpacking any .zip
+  // (Naukri Resdex / Internshala bulk exports often come as a ZIP of resumes).
+  async function expandToPdfs(selected: File[]): Promise<File[]> {
+    const out: File[] = [];
+    for (const f of selected) {
+      const isZip = /\.zip$/i.test(f.name) || f.type === "application/zip" || f.type === "application/x-zip-compressed";
+      if (isZip) {
+        try {
+          const zip = await JSZip.loadAsync(f);
+          const entries = Object.values(zip.files);
+          for (const entry of entries) {
+            if (entry.dir) continue;
+            if (!/\.pdf$/i.test(entry.name)) continue;
+            const blob = await entry.async("blob");
+            const base = entry.name.split("/").pop() || entry.name;
+            out.push(new File([blob], base, { type: "application/pdf" }));
+          }
+        } catch (err) {
+          console.warn(`Could not read ZIP ${f.name}:`, err);
+          toast({
+            title: `Couldn't open ${f.name}`,
+            description: "The ZIP may be corrupt or password-protected.",
+            variant: "destructive",
+          });
+        }
+      } else if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") {
+        out.push(f);
+      }
+    }
+    return out;
+  }
+
   async function uploadOne(file: File, index: number): Promise<string> {
     const safe = sanitizeFileName(file.name);
     const fileName = `${Date.now()}_${index}_${safe}`;
@@ -221,6 +254,16 @@ export default function InternScreening() {
     const batch = batchName.trim();
     const createdItems: { candidateId: string; resumeText: string; fileName: string }[] = [];
     try {
+      // 0) Unpack any ZIPs into a flat list of PDFs.
+      setProgress("Reading files…");
+      const pdfs = await expandToPdfs(files);
+      if (pdfs.length === 0) {
+        toast({ title: "No PDFs found", description: "Select PDF resumes, or a ZIP that contains PDFs.", variant: "destructive" });
+        setUploading(false);
+        setProgress(null);
+        return;
+      }
+
       // 1) Record the batch (best-effort; screening still proceeds if this fails).
       try {
         const { data: authData } = await supabase.auth.getUser();
@@ -229,7 +272,7 @@ export default function InternScreening() {
           source_portal: sourcePortal,
           target_role: jobs.find((j: any) => String(j.id) === targetJobId)?.job_title ?? null,
           target_job_id: targetJobId || null,
-          candidate_count: files.length,
+          candidate_count: pdfs.length,
           created_by: authData?.user?.id ?? null,
         });
       } catch (err) {
@@ -238,9 +281,9 @@ export default function InternScreening() {
 
       // 2) Upload each resume + create a candidate row tagged to this batch.
       let done = 0;
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setProgress(`Uploading ${done + 1} / ${files.length}: ${file.name}`);
+      for (let i = 0; i < pdfs.length; i++) {
+        const file = pdfs[i];
+        setProgress(`Uploading ${done + 1} / ${pdfs.length}: ${file.name}`);
         try {
           const resumeUrl = await uploadOne(file, i);
           // Extract the PDF text in the browser (no server-side PDF library needed).
@@ -427,8 +470,8 @@ export default function InternScreening() {
             <Upload className="h-5 w-5" /> Upload a batch
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            Select multiple PDF resumes at once. Each is uploaded, parsed and scored on skills, projects,
-            coursework, CGPA and certifications.
+            Select multiple PDF resumes — or a ZIP exported from Naukri Resdex / Internshala — at once. Each is
+            uploaded, parsed and scored on skills, projects, coursework, CGPA and certifications.
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -485,17 +528,19 @@ export default function InternScreening() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="resume-files">Resume PDFs</Label>
+            <Label htmlFor="resume-files">Resume PDFs or a ZIP</Label>
             <Input
               id="resume-files"
               type="file"
-              accept="application/pdf,.pdf"
+              accept="application/pdf,.pdf,.zip,application/zip,application/x-zip-compressed"
               multiple
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
-            {files.length > 0 && (
-              <p className="text-xs text-muted-foreground">{files.length} file(s) selected</p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              {files.length > 0
+                ? `${files.length} item(s) selected`
+                : "Select multiple PDFs, or a single ZIP exported from Naukri Resdex / Internshala."}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
