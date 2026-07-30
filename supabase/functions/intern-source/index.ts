@@ -33,6 +33,8 @@ const ENV = {
   GOOGLE_CSE_KEY: Deno.env.get("GOOGLE_CSE_KEY") ?? "",
   GOOGLE_CSE_CX: Deno.env.get("GOOGLE_CSE_CX") ?? "",
   SERPAPI_KEY: Deno.env.get("SERPAPI_KEY") ?? "",
+  GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
+  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-2.0-flash",
 };
 
 type Lead = {
@@ -221,6 +223,83 @@ async function serpApi(query: string, num: number): Promise<Lead[]> {
   return leads;
 }
 
+// ---- Gemini + Google Search grounding (uses a GEMINI_API_KEY) ----
+async function geminiSearch(
+  colleges: string[],
+  locations: string[],
+  skills: string[],
+  maxLeads: number,
+): Promise<Lead[]> {
+  if (!ENV.GEMINI_API_KEY) return [];
+  const prompt =
+    `Find up to ${maxLeads} PUBLIC online profiles of students or recent graduates suitable for an internship. ` +
+    `Skills: ${skills.join(", ") || "any"}. Locations: ${locations.join(", ") || "any"}. ` +
+    `Colleges: ${colleges.join(", ") || "any"}. ` +
+    `Prefer GitHub profiles, personal portfolio sites, and publicly posted resume PDFs. ` +
+    `For each person give their name and the direct public URL.`;
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent?key=${ENV.GEMINI_API_KEY}`;
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+      }),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const cand = data?.candidates?.[0];
+    const leads: Lead[] = [];
+    const seen = new Set<string>();
+
+    // 1) Grounding chunks: real, search-backed source URLs.
+    const chunks = cand?.groundingMetadata?.groundingChunks ?? [];
+    for (const ch of chunks) {
+      const uri = ch?.web?.uri as string | undefined;
+      const title = (ch?.web?.title as string | undefined) ?? null;
+      if (!uri || seen.has(uri)) continue;
+      seen.add(uri);
+      leads.push({
+        name: title,
+        kind: classifyLink(title || uri),
+        source: "Web (Gemini)",
+        url: uri,
+        snippet: title,
+        location: locations[0] ?? null,
+        college: colleges[0] ?? null,
+        skills: skills.slice(0, 5),
+        query: "gemini google_search",
+      });
+    }
+
+    // 2) Any explicit URLs the model listed in its answer text.
+    const text: string = cand?.content?.parts?.map((p: any) => p?.text ?? "").join(" ") ?? "";
+    const urlMatches = text.match(/https?:\/\/[^\s)\]]+/g) ?? [];
+    for (const raw of urlMatches) {
+      const u = raw.replace(/[.,;]+$/, "");
+      if (seen.has(u)) continue;
+      seen.add(u);
+      leads.push({
+        name: null,
+        kind: classifyLink(u),
+        source: "Web (Gemini)",
+        url: u,
+        snippet: null,
+        location: locations[0] ?? null,
+        college: colleges[0] ?? null,
+        skills: skills.slice(0, 5),
+        query: "gemini google_search",
+      });
+    }
+
+    return leads.slice(0, maxLeads);
+  } catch (_err) {
+    return [];
+  }
+}
+
 async function webSearch(
   colleges: string[],
   locations: string[],
@@ -229,7 +308,11 @@ async function webSearch(
 ): Promise<Lead[]> {
   const hasCse = ENV.GOOGLE_CSE_KEY && ENV.GOOGLE_CSE_CX;
   const hasSerp = ENV.SERPAPI_KEY;
-  if (!hasCse && !hasSerp) return [];
+  // Prefer a dedicated search API; otherwise fall back to Gemini grounding.
+  if (!hasCse && !hasSerp) {
+    if (ENV.GEMINI_API_KEY) return await geminiSearch(colleges, locations, skills, maxLeads);
+    return [];
+  }
 
   // Build a few high-signal queries (bounded to keep quota use small).
   const skillStr = skills.slice(0, 3).join(" ");
@@ -283,7 +366,8 @@ Deno.serve(async (req) => {
         service: "intern-source",
         github: true,
         githubToken: Boolean(ENV.GITHUB_TOKEN),
-        web: Boolean((ENV.GOOGLE_CSE_KEY && ENV.GOOGLE_CSE_CX) || ENV.SERPAPI_KEY),
+        web: Boolean((ENV.GOOGLE_CSE_KEY && ENV.GOOGLE_CSE_CX) || ENV.SERPAPI_KEY || ENV.GEMINI_API_KEY),
+        gemini: Boolean(ENV.GEMINI_API_KEY),
       });
     }
     if (req.method !== "POST") {
@@ -348,7 +432,7 @@ Deno.serve(async (req) => {
       if (!error) saved++;
     }
 
-    const webEnabled = Boolean((ENV.GOOGLE_CSE_KEY && ENV.GOOGLE_CSE_CX) || ENV.SERPAPI_KEY);
+    const webEnabled = Boolean((ENV.GOOGLE_CSE_KEY && ENV.GOOGLE_CSE_CX) || ENV.SERPAPI_KEY || ENV.GEMINI_API_KEY);
     return jsonResponse({
       ok: true,
       found: leads.length,
