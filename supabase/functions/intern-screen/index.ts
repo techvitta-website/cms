@@ -19,7 +19,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.3";
 
 // pdfjs-dist for Deno via esm.sh (worker disabled in Edge runtime)
 // deno-lint-ignore no-explicit-any
-const pdfjsLib: any = await import("https://esm.sh/pdfjs-dist@3.11.174/legacy/build/pdf.mjs");
+const pdfjsLib: any = await import("https://esm.sh/pdfjs-dist@3.11.174/legacy/build/pdf.mjs?external=canvas");
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
