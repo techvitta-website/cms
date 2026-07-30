@@ -12,6 +12,7 @@ import ArchivedCandidates from "./pages/ArchivedCandidates";
 import Logs from "./pages/Logs";
 import Shortlist from "./pages/Shortlist";
 import InternScreening from "./pages/InternScreening";
+import InternSourcing from "./pages/InternSourcing";
 import Interview from "./pages/Interview";
 import Feedback from "./pages/Feedback";
 import DocumentVerification from "./pages/DocumentVerification";
@@ -1453,6 +1454,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Layout>
                     <InternScreening />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/intern-sourcing"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <InternSourcing />
                   </Layout>
                 </ProtectedRoute>
               }

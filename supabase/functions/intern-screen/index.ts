@@ -28,6 +28,8 @@ const ENV = {
   SUPABASE_URL: Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY") ?? "",
+  GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
+  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest",
 };
 
 type InternExtraction = {
@@ -163,10 +165,9 @@ function localHeuristicIntern(resumeText: string, fileName: string): InternExtra
   };
 }
 
-async function callOpenAIIntern(resumeText: string): Promise<InternExtraction | null> {
-  if (!ENV.OPENAI_API_KEY) return null;
-  const sys = "You are a precise resume parser for a college-intern hiring pipeline. Return STRICT JSON only.";
-  const user = `Parse the intern/student resume text below. Return ONLY JSON with these keys:
+// Shared parser instruction, used by both the Gemini and OpenAI paths.
+function internPrompt(resumeText: string): string {
+  return `Parse the intern/student resume text below. Return ONLY JSON with these keys:
 {
   "name": string | null,
   "email": string | null,
@@ -186,6 +187,66 @@ Do not invent data. Use null / [] when a field is absent.
 
 Resume text:
 ${resumeText.slice(0, 30000)}`;
+}
+
+// Coerce a parsed JSON object (from any model) into a clean InternExtraction.
+function normalizeExtraction(parsed: Record<string, unknown>): InternExtraction {
+  const gy = Number(parsed.graduation_year);
+  const cg = Number(parsed.cgpa);
+  return {
+    name: (parsed.name as string) ?? null,
+    email: (parsed.email as string) ?? null,
+    phone: (parsed.phone as string) ?? null,
+    skills: normalizeSkills((parsed.skills as string[]) ?? []),
+    college: (parsed.college as string) ?? null,
+    degree: (parsed.degree as string) ?? null,
+    branch: (parsed.branch as string) ?? null,
+    graduation_year: Number.isFinite(gy) && gy > 1990 && gy < 2100 ? Math.trunc(gy) : null,
+    cgpa: Number.isFinite(cg) && cg > 0 ? cg : null,
+    projects: cleanList(parsed.projects),
+    certifications: cleanList(parsed.certifications),
+    coursework: cleanList(parsed.coursework),
+    experience_years: Math.max(0, Math.min(10, Number(parsed.experience_years ?? 0))) || 0,
+    education: (parsed.degree as string) ?? null,
+  };
+}
+
+// Google Gemini path (preferred when GEMINI_API_KEY is set).
+async function callGeminiIntern(resumeText: string): Promise<InternExtraction | null> {
+  if (!ENV.GEMINI_API_KEY) return null;
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent`;
+  const body = {
+    contents: [{ parts: [{ text: internPrompt(resumeText) }] }],
+    generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+  };
+  let lastError: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": ENV.GEMINI_API_KEY },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error(`Gemini ${resp.status}`);
+      const data = await resp.json();
+      const jsonText: string = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
+      const parsed = safeJson<Record<string, unknown>>(jsonText);
+      if (!parsed) throw new Error("Invalid JSON from Gemini");
+      return normalizeExtraction(parsed);
+    } catch (err) {
+      lastError = err;
+      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  console.warn("Gemini intern extraction failed after retries:", lastError);
+  return null;
+}
+
+async function callOpenAIIntern(resumeText: string): Promise<InternExtraction | null> {
+  if (!ENV.OPENAI_API_KEY) return null;
+  const sys = "You are a precise resume parser for a college-intern hiring pipeline. Return STRICT JSON only.";
+  const user = internPrompt(resumeText);
 
   const body = {
     model: "gpt-4o-mini",
@@ -333,7 +394,7 @@ async function screenOne(
     .eq("id", candidateId)
     .maybeSingle();
 
-  const ai = await callOpenAIIntern(resumeText);
+  const ai = (await callGeminiIntern(resumeText)) ?? (await callOpenAIIntern(resumeText));
   const fields = ai ?? localHeuristicIntern(resumeText, item.fileName ?? "");
   const scored = computeInternScore(fields, targetSkills);
 
@@ -391,7 +452,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
 
     if (url.pathname.endsWith("/health")) {
-      return jsonResponse({ ok: true, service: "intern-screen", openai: Boolean(ENV.OPENAI_API_KEY) });
+      return jsonResponse({ ok: true, service: "intern-screen", gemini: Boolean(ENV.GEMINI_API_KEY), openai: Boolean(ENV.OPENAI_API_KEY) });
     }
 
     if (req.method !== "POST") {
