@@ -15,7 +15,6 @@
 //   POST /                            -> body { candidateIds: string[], targetSkills?: string[], targetRole?: string }
 //                                        (also accepts { candidateId: string })
 
-import "jsr:@supabase/functions-js/edge-runtime-polyfills";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.3";
 
 // pdfjs-dist for Deno via esm.sh (worker disabled in Edge runtime)
