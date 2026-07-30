@@ -26,6 +26,8 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
   GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest",
+  RESEND_API_KEY: Deno.env.get("RESEND_API_KEY") ?? "",
+  RESEND_BASE: Deno.env.get("RESEND_BASE") ?? "https://api.resend.com",
   RESEND_WEBHOOK_SECRET: Deno.env.get("RESEND_WEBHOOK_SECRET") ?? "",
   INTAKE_BATCH: Deno.env.get("INTAKE_BATCH") ?? "Email intake",
 };
@@ -223,7 +225,18 @@ function computeInternScore(fields: InternExtraction): Scored {
 }
 
 // ---- Attachment extraction from a Resend inbound webhook payload ----
-type RawAttachment = { filename?: string; content?: string; content_type?: string; contentType?: string; url?: string };
+// Resend's email.received webhook carries attachment METADATA only (id,
+// filename, content_type). The bytes are fetched from the Resend API, which
+// returns a signed download_url. We also accept inline content/url so the
+// function can be tested with a hand-built payload.
+type RawAttachment = {
+  id?: string;
+  filename?: string;
+  content?: string;
+  content_type?: string;
+  contentType?: string;
+  url?: string;
+};
 
 function collectAttachments(payload: any): RawAttachment[] {
   const d = payload?.data ?? payload;
@@ -254,16 +267,37 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function attachmentBytes(att: RawAttachment): Promise<Uint8Array | null> {
+async function attachmentBytes(emailId: string | null, att: RawAttachment): Promise<Uint8Array | null> {
+  // 1) Inline content / direct URL (hand-built test payloads or other providers).
   try {
     if (att.content) return base64ToBytes(att.content);
     if (att.url) {
       const resp = await fetch(att.url);
-      if (!resp.ok) return null;
-      return new Uint8Array(await resp.arrayBuffer());
+      if (resp.ok) return new Uint8Array(await resp.arrayBuffer());
     }
   } catch (_err) {
-    return null;
+    // fall through to the Resend API path
+  }
+
+  // 2) Resend: fetch a signed download_url from the Received Emails API, then
+  //    download the file bytes from it.
+  if (emailId && att.id && ENV.RESEND_API_KEY) {
+    try {
+      const metaResp = await fetch(
+        `${ENV.RESEND_BASE}/emails/receiving/${emailId}/attachments/${att.id}`,
+        { headers: { Authorization: `Bearer ${ENV.RESEND_API_KEY}` } },
+      );
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        const dl = meta?.download_url as string | undefined;
+        if (dl) {
+          const fileResp = await fetch(dl);
+          if (fileResp.ok) return new Uint8Array(await fileResp.arrayBuffer());
+        }
+      }
+    } catch (_err) {
+      return null;
+    }
   }
   return null;
 }
@@ -292,7 +326,7 @@ Deno.serve(async (req) => {
     }
     const url = new URL(req.url);
     if (url.pathname.endsWith("/health")) {
-      return jsonResponse({ ok: true, service: "intern-email-intake", gemini: Boolean(ENV.GEMINI_API_KEY) });
+      return jsonResponse({ ok: true, service: "intern-email-intake", gemini: Boolean(ENV.GEMINI_API_KEY), resend: Boolean(ENV.RESEND_API_KEY) });
     }
     if (req.method !== "POST") {
       return jsonResponse({ ok: true, message: "intern-email-intake online. POST a Resend inbound webhook." });
@@ -308,6 +342,7 @@ Deno.serve(async (req) => {
 
     const payload = await req.json().catch(() => ({}));
     const data = (payload as any)?.data ?? payload;
+    const emailId: string | null = data?.email_id ?? data?.id ?? null;
     const fromEmail: string | null = (data?.from ?? null) && String(data.from).toLowerCase();
     const subject: string = data?.subject ?? "";
 
@@ -324,7 +359,7 @@ Deno.serve(async (req) => {
       index++;
       const filename = att.filename ?? `resume_${index}.pdf`;
       try {
-        const bytes = await attachmentBytes(att);
+        const bytes = await attachmentBytes(emailId, att);
         if (!bytes || bytes.length < 100) {
           results.push({ filename, ok: false, error: "empty attachment" });
           continue;
