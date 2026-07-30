@@ -34,7 +34,7 @@ const ENV = {
   GOOGLE_CSE_CX: Deno.env.get("GOOGLE_CSE_CX") ?? "",
   SERPAPI_KEY: Deno.env.get("SERPAPI_KEY") ?? "",
   GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
-  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-2.0-flash",
+  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest",
 };
 
 type Lead = {
@@ -238,11 +238,11 @@ async function geminiSearch(
     `Prefer GitHub profiles, personal portfolio sites, and publicly posted resume PDFs. ` +
     `For each person give their name and the direct public URL.`;
   const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent?key=${ENV.GEMINI_API_KEY}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent`;
   try {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": ENV.GEMINI_API_KEY },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         tools: [{ google_search: {} }],

@@ -29,7 +29,7 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY") ?? "",
   GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") ?? "",
-  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-2.0-flash",
+  GEMINI_MODEL: Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest",
 };
 
 type InternExtraction = {
@@ -215,7 +215,7 @@ function normalizeExtraction(parsed: Record<string, unknown>): InternExtraction 
 async function callGeminiIntern(resumeText: string): Promise<InternExtraction | null> {
   if (!ENV.GEMINI_API_KEY) return null;
   const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent?key=${ENV.GEMINI_API_KEY}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent`;
   const body = {
     contents: [{ parts: [{ text: internPrompt(resumeText) }] }],
     generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
@@ -225,7 +225,7 @@ async function callGeminiIntern(resumeText: string): Promise<InternExtraction | 
     try {
       const resp = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": ENV.GEMINI_API_KEY },
         body: JSON.stringify(body),
       });
       if (!resp.ok) throw new Error(`Gemini ${resp.status}`);
