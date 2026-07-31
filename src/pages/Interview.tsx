@@ -148,6 +148,7 @@ export default function Interview() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickCandidate, setQuickCandidate] = useState<Candidate | null>(null);
   const [quickForm, setQuickForm] = useState<QuickForm | null>(null);
+  const [quickMode, setQuickMode] = useState<"new" | "reschedule">("new");
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
   const [stageView, setStageView] = useState<"awaiting" | "scheduled" | "all">("awaiting");
 
@@ -555,6 +556,24 @@ export default function Interview() {
     return m;
   }, [interviewHistory]);
 
+  // Full details of each candidate's latest booking, for pre-filling reschedule.
+  const bookedInfoByCandidate = useMemo(() => {
+    const m = new Map<string, { date: string; panel: string; link: string }>();
+    (interviewHistory as any[]).forEach((iv) => {
+      if (iv.candidate_id && iv.interview_date) {
+        const prev = m.get(iv.candidate_id);
+        if (!prev || new Date(iv.interview_date) > new Date(prev.date)) {
+          m.set(iv.candidate_id, {
+            date: iv.interview_date,
+            panel: iv.interview_panel || "",
+            link: extractMeetingLink(iv.notes) || "",
+          });
+        }
+      }
+    });
+    return m;
+  }, [interviewHistory]);
+
   // Move a candidate to a different pipeline stage from the Interview tab.
   // Mainly used to send someone back to "Shortlisted" if the interview can't
   // happen — they then leave this tab and reappear on the Shortlist page.
@@ -606,10 +625,12 @@ export default function Interview() {
     updateStageMutation.mutate({ candidate, newStatus });
   };
 
-  // Open the one-click quick-schedule dialog with an auto-picked slot and the
-  // remembered default panel + company meeting link.
-  const handleOpenQuick = (candidate: Candidate) => {
-    const slot = computeQuickSlot(takenSlots, new Date());
+  // Open the quick dialog. mode "new" auto-picks the next open slot; mode
+  // "reschedule" pre-fills the candidate's current booked slot / panel / link.
+  const handleOpenQuick = (candidate: Candidate, mode: "new" | "reschedule" = "new") => {
+    setQuickMode(mode);
+    setQuickCandidate(candidate);
+
     let savedLink = "";
     let savedPanel = FALLBACK_PANEL;
     try {
@@ -618,13 +639,25 @@ export default function Interview() {
     } catch {
       // localStorage unavailable — fall back to defaults.
     }
-    setQuickCandidate(candidate);
-    setQuickForm({
-      date: slot,
-      time: format(slot, "HH:mm"),
-      panel: savedPanel,
-      link: savedLink,
-    });
+
+    if (mode === "reschedule") {
+      const info = bookedInfoByCandidate.get(candidate.id);
+      const current = info ? new Date(info.date) : computeQuickSlot(takenSlots, new Date());
+      setQuickForm({
+        date: current,
+        time: format(current, "HH:mm"),
+        panel: info?.panel || savedPanel,
+        link: info?.link || savedLink,
+      });
+    } else {
+      const slot = computeQuickSlot(takenSlots, new Date());
+      setQuickForm({
+        date: slot,
+        time: format(slot, "HH:mm"),
+        panel: savedPanel,
+        link: savedLink,
+      });
+    }
     setQuickOpen(true);
   };
 
@@ -636,39 +669,77 @@ export default function Interview() {
       time,
       panel,
       link,
+      mode,
     }: {
       candidate: Candidate;
       date: Date;
       time: string;
       panel: string;
       link: string;
+      mode: "new" | "reschedule";
     }) => {
       const interviewDateTime = new Date(date);
       const [hours, minutes] = time.split(":").map(Number);
       interviewDateTime.setHours(hours, minutes, 0, 0);
 
-      // Don't double-send if this candidate was already invited.
-      const { data: existingLogs } = await supabase
-        .from("activity_logs")
-        .select("id")
-        .eq("action", "INTERVIEW_EMAIL_SENT")
-        .ilike("details", `%${candidate.email}%`)
-        .limit(1);
-      if (existingLogs && existingLogs.length > 0) {
-        throw new Error("Interview email has already been sent to this candidate.");
+      // A brand-new booking must not double-send if already invited. A
+      // reschedule is an intentional re-notify, so it skips this guard.
+      if (mode === "new") {
+        const { data: existingLogs } = await supabase
+          .from("activity_logs")
+          .select("id")
+          .eq("action", "INTERVIEW_EMAIL_SENT")
+          .ilike("details", `%${candidate.email}%`)
+          .limit(1);
+        if (existingLogs && existingLogs.length > 0) {
+          throw new Error("Interview email has already been sent to this candidate.");
+        }
       }
 
       const notes = link ? `Meeting Link: ${link}` : null;
 
-      const { error: insertError } = await supabase.from("interviews").insert({
-        candidate_id: candidate.id,
-        candidate_name: candidate.full_name,
-        interview_mode: "Online",
-        interview_date: interviewDateTime.toISOString(),
-        interview_panel: panel,
-        notes,
-      });
-      if (insertError) throw insertError;
+      if (mode === "reschedule") {
+        // Update the candidate's most recent interview record in place so the
+        // booking moves rather than creating a duplicate.
+        const { data: existing } = await supabase
+          .from("interviews")
+          .select("id")
+          .eq("candidate_id", candidate.id)
+          .order("interview_date", { ascending: false })
+          .limit(1);
+        if (existing && existing.length > 0) {
+          const { error: updErr } = await supabase
+            .from("interviews")
+            .update({
+              interview_mode: "Online",
+              interview_date: interviewDateTime.toISOString(),
+              interview_panel: panel,
+              notes,
+            })
+            .eq("id", existing[0].id);
+          if (updErr) throw updErr;
+        } else {
+          const { error: insErr } = await supabase.from("interviews").insert({
+            candidate_id: candidate.id,
+            candidate_name: candidate.full_name,
+            interview_mode: "Online",
+            interview_date: interviewDateTime.toISOString(),
+            interview_panel: panel,
+            notes,
+          });
+          if (insErr) throw insErr;
+        }
+      } else {
+        const { error: insertError } = await supabase.from("interviews").insert({
+          candidate_id: candidate.id,
+          candidate_name: candidate.full_name,
+          interview_mode: "Online",
+          interview_date: interviewDateTime.toISOString(),
+          interview_panel: panel,
+          notes,
+        });
+        if (insertError) throw insertError;
+      }
 
       await supabase
         .from("candidates")
@@ -680,11 +751,10 @@ export default function Interview() {
         .eq("candidate_id", candidate.id);
 
       await supabase.from("activity_logs").insert({
-        action: "INTERVIEW_SCHEDULED",
-        details: `Interview auto-scheduled (Quick): Online with panel ${panel} on ${format(
-          interviewDateTime,
-          "PPP 'at' p",
-        )}.`,
+        action: mode === "reschedule" ? "INTERVIEW_RESCHEDULED" : "INTERVIEW_SCHEDULED",
+        details: `${
+          mode === "reschedule" ? "Interview rescheduled" : "Interview auto-scheduled (Quick)"
+        }: Online with panel ${panel} on ${format(interviewDateTime, "PPP 'at' p")}.`,
       });
 
       const { data, error } = await supabase.functions.invoke("send-email", {
@@ -700,7 +770,10 @@ export default function Interview() {
             interviewMode: "Online",
             interviewPanel: panel || "",
             interviewPanelLink: link || "",
-            interviewNotes: "",
+            interviewNotes:
+              mode === "reschedule"
+                ? "Please note: your interview has been rescheduled to the date and time shown above."
+                : "",
             locationDetails: "",
             reportingInstructions: "",
             documentsToBring: "",
@@ -713,7 +786,7 @@ export default function Interview() {
 
       await supabase.from("activity_logs").insert({
         action: "INTERVIEW_EMAIL_SENT",
-        details: `Interview email sent to ${candidate.full_name} (${candidate.email})`,
+        details: `Interview ${mode === "reschedule" ? "reschedule " : ""}email sent to ${candidate.full_name} (${candidate.email})`,
       });
 
       // Remember the panel + link as the defaults for next time.
@@ -724,12 +797,15 @@ export default function Interview() {
         // ignore
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["shortlisted-candidates"] });
       queryClient.invalidateQueries({ queryKey: ["interview-history"] });
       toast({
-        title: "Interview scheduled",
-        description: "Slot booked and the invite was emailed to the candidate.",
+        title: variables.mode === "reschedule" ? "Interview rescheduled" : "Interview scheduled",
+        description:
+          variables.mode === "reschedule"
+            ? "New slot saved and the candidate was re-notified."
+            : "Slot booked and the invite was emailed to the candidate.",
       });
       setQuickOpen(false);
       setQuickCandidate(null);
@@ -899,6 +975,17 @@ export default function Interview() {
                 {updatingStageId === candidate.id && (
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 )}
+                {bookedByCandidate.has(candidate.id) ? (
+                  <Button
+                    variant="default"
+                    className="bg-gradient-primary hover:opacity-90"
+                    onClick={() => handleOpenQuick(candidate, "reschedule")}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    Reschedule
+                  </Button>
+                ) : (
+                  <>
                 <Button
                   variant="default"
                   className="bg-gradient-primary hover:opacity-90"
@@ -1160,6 +1247,8 @@ export default function Interview() {
                   </form>
                 </DialogContent>
               </Dialog>
+                  </>
+                )}
             </div>
             </CandidateCard>
           ))
@@ -1170,13 +1259,18 @@ export default function Interview() {
       <Dialog open={quickOpen} onOpenChange={(o) => !quickScheduleMutation.isPending && setQuickOpen(o)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Quick schedule — {quickCandidate?.full_name}</DialogTitle>
+            <DialogTitle>
+              {quickMode === "reschedule" ? "Reschedule interview" : "Quick schedule"} —{" "}
+              {quickCandidate?.full_name}
+            </DialogTitle>
           </DialogHeader>
           {quickForm && (
             <div className="space-y-4 mt-2">
               <p className="text-sm text-muted-foreground">
-                Auto-picked the next open weekday slot. Adjust if needed, then confirm — the invite is
-                emailed to {quickCandidate?.email}.
+                {quickMode === "reschedule"
+                  ? "Update the date/time below — the candidate will be re-notified at "
+                  : "Auto-picked the next open weekday slot. Adjust if needed, then confirm — the invite is emailed to "}
+                {quickCandidate?.email}.
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -1248,6 +1342,7 @@ export default function Interview() {
                       time: quickForm.time,
                       panel: quickForm.panel,
                       link: quickForm.link,
+                      mode: quickMode,
                     })
                   }
                   disabled={quickScheduleMutation.isPending || !quickForm.time}
@@ -1255,12 +1350,12 @@ export default function Interview() {
                   {quickScheduleMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Scheduling…
+                      {quickMode === "reschedule" ? "Rescheduling…" : "Scheduling…"}
                     </>
                   ) : (
                     <>
                       <Mail className="mr-2 h-4 w-4" />
-                      Confirm &amp; send
+                      {quickMode === "reschedule" ? "Reschedule & notify" : "Confirm & send"}
                     </>
                   )}
                 </Button>
