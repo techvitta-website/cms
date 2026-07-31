@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import OfferLetterGenerator from "@/components/OfferLetterGenerator";
 
 interface Candidate {
   id: string;
@@ -285,7 +286,7 @@ export default function OfferLetter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadCandidate, setUploadCandidate] = useState<Candidate | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("generate");
+  const [activeTab, setActiveTab] = useState("auto");
   const [searchTerm, setSearchTerm] = useState("");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
@@ -866,16 +867,24 @@ export default function OfferLetter() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+          <TabsTrigger value="auto" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Auto-Generate &amp; Send
+          </TabsTrigger>
           <TabsTrigger value="generate" className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
-            Generate Offer Letter
+            Manual Upload
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             History ({offerLettersHistory.length})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="auto" className="mt-6">
+          <OfferLetterGenerator candidates={candidates} isLoading={isLoading} />
+        </TabsContent>
 
         <TabsContent value="generate" className="space-y-6 mt-6">
       {/* Search Bar */}
