@@ -83,7 +83,7 @@ export default function ExperienceLetter() {
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
-  const [activeTab, setActiveTab] = useState("upload");
+  const [activeTab, setActiveTab] = useState("generate");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
 
   // Fetch all candidates (since experience letters can be sent to any candidate)
@@ -846,13 +846,13 @@ export default function ExperienceLetter() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full max-w-2xl grid-cols-3">
-          <TabsTrigger value="upload" className="flex items-center gap-2">
-            <Upload className="h-4 w-4" />
-            Upload Experience Letter
-          </TabsTrigger>
           <TabsTrigger value="generate" className="flex items-center gap-2">
             <Award className="h-4 w-4" />
-            Generate Certificate
+            Auto-Generate &amp; Send
+          </TabsTrigger>
+          <TabsTrigger value="upload" className="flex items-center gap-2">
+            <Upload className="h-4 w-4" />
+            Manual Upload
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
