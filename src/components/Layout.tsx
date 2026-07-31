@@ -1,9 +1,8 @@
 import { ReactNode, useState } from "react";
 import Header from "./Header";
-import Sidebar, { menuItems } from "./Sidebar";
+import Sidebar, { visibleSections, NavItem, SectionHeading } from "./Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
-import { NavLink } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { isAdmin } from "@/lib/roles";
 
@@ -15,11 +14,9 @@ export default function Layout({ children }: LayoutProps) {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { hrUser } = useAuth();
-  // Same filter as the desktop sidebar: admin-only links stay out of
+  // Same grouping as the desktop sidebar; admin-only links stay out of
   // non-admin menus (the route guard enforces it either way).
-  const visibleItems = menuItems.filter(
-    (item) => !("adminOnly" in item && item.adminOnly) || isAdmin(hrUser)
-  );
+  const sections = visibleSections(isAdmin(hrUser));
 
   const handleToggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -39,26 +36,20 @@ export default function Layout({ children }: LayoutProps) {
       {/* Mobile sidebar overlay */}
       {isMobile && isSidebarOpen && (
         <div className="fixed inset-0 z-40 flex md:hidden">
-          <div className="w-72 max-w-[80vw] bg-card border-r border-border shadow-lg pt-16">
-            <nav className="flex flex-col gap-1 p-4 overflow-y-auto">
-              {visibleItems.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200",
-                      "hover:bg-accent hover:text-accent-foreground",
-                      isActive
-                        ? "bg-gradient-primary text-primary-foreground shadow-md"
-                        : "text-muted-foreground"
-                    )
-                  }
-                  onClick={handleCloseSidebar}
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
-                </NavLink>
+          <div className="w-72 max-w-[80vw] border-r border-border shadow-lg pt-16 bg-gradient-to-b from-card to-muted/40">
+            <nav className="flex flex-col gap-5 p-4 overflow-y-auto h-full">
+              {sections.map((section) => (
+                <div key={section.title} className="flex flex-col gap-1">
+                  <SectionHeading section={section} />
+                  {section.items.map((item) => (
+                    <NavItem
+                      key={item.path}
+                      item={item}
+                      accent={section.accent}
+                      onClick={handleCloseSidebar}
+                    />
+                  ))}
+                </div>
               ))}
             </nav>
           </div>

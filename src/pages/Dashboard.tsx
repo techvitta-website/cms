@@ -2899,7 +2899,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
+        <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 border-t-4 border-t-blue-500 bg-gradient-to-br from-blue-500/5 to-transparent">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Total Candidates
@@ -2940,13 +2940,15 @@ export default function Dashboard() {
                 }}
                 title="Refresh count"
               >
-                <RefreshCw className="h-4 w-4 text-primary" />
+                <RefreshCw className="h-4 w-4 text-blue-600" />
               </Button>
-              <Users className="h-5 w-5 text-primary" />
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10">
+                <Users className="h-5 w-5 text-blue-600" />
+              </span>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">{totalDashboardCandidates}</div>
+            <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{totalDashboardCandidates}</div>
             <p className="text-xs text-muted-foreground mt-1">
               Total candidates in dashboard
             </p>
@@ -2954,7 +2956,7 @@ export default function Dashboard() {
         </Card>
 
         <Card
-          className="shadow-md hover:shadow-lg transition-shadow duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none"
+          className="shadow-md hover:shadow-lg transition-shadow duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none border-t-4 border-t-violet-500 bg-gradient-to-br from-violet-500/5 to-transparent"
           onClick={() => navigate("/recruitment-hub")}
           onKeyDown={handleJobsCardKeyDown}
           role="button"
@@ -2964,10 +2966,12 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Total Jobs
             </CardTitle>
-            <Briefcase className="h-5 w-5 text-primary" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10">
+              <Briefcase className="h-5 w-5 text-violet-600" />
+            </span>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">{jobsCount || 0}</div>
+            <div className="text-3xl font-bold text-violet-600 dark:text-violet-400">{jobsCount || 0}</div>
             <p className="text-xs text-muted-foreground mt-1">
               Total positions
             </p>
@@ -2978,12 +2982,14 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Button
           onClick={() => navigate("/shortlist")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <CheckSquare className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{shortlistedCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/10">
+              <CheckSquare className="h-6 w-6 text-amber-600" />
+            </span>
+            <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">{shortlistedCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">Shortlist</p>
@@ -2993,12 +2999,14 @@ export default function Dashboard() {
 
         <Button
           onClick={() => navigate("/interview")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <Calendar className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{interviewScheduledCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/10">
+              <Calendar className="h-6 w-6 text-sky-600" />
+            </span>
+            <span className="text-2xl font-bold text-sky-600 dark:text-sky-400">{interviewScheduledCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">Interview</p>
@@ -3008,12 +3016,14 @@ export default function Dashboard() {
 
         <Button
           onClick={() => navigate("/feedback")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-violet-500/30 hover:border-violet-500/60 hover:bg-violet-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <MessageSquare className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{feedbackCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/10">
+              <MessageSquare className="h-6 w-6 text-violet-600" />
+            </span>
+            <span className="text-2xl font-bold text-violet-600 dark:text-violet-400">{feedbackCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">Feedback</p>
@@ -3023,12 +3033,14 @@ export default function Dashboard() {
 
         <Button
           onClick={() => navigate("/document-verification")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-emerald-500/30 hover:border-emerald-500/60 hover:bg-emerald-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <ShieldCheck className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{documentVerificationCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10">
+              <ShieldCheck className="h-6 w-6 text-emerald-600" />
+            </span>
+            <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{documentVerificationCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">CID Verification</p>
@@ -3038,12 +3050,14 @@ export default function Dashboard() {
 
         <Button
           onClick={() => navigate("/offer-letter")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-indigo-500/30 hover:border-indigo-500/60 hover:bg-indigo-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <FileText className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{approvedCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-500/10">
+              <FileText className="h-6 w-6 text-indigo-600" />
+            </span>
+            <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{approvedCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">Offer Letter</p>
@@ -3053,12 +3067,14 @@ export default function Dashboard() {
 
         <Button
           onClick={() => navigate("/experience-letter")}
-          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200"
+          className="h-auto p-6 flex flex-col items-start justify-start gap-2 shadow-md hover:shadow-lg transition-shadow duration-200 border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/5"
           variant="outline"
         >
           <div className="flex items-center justify-between w-full">
-            <Award className="h-6 w-6 text-primary" />
-            <span className="text-2xl font-bold">{experienceLetterCount || 0}</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/10">
+              <Award className="h-6 w-6 text-rose-600" />
+            </span>
+            <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">{experienceLetterCount || 0}</span>
           </div>
           <div className="text-left">
             <p className="font-semibold text-base">Experience Letter</p>

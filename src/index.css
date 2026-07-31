@@ -42,8 +42,21 @@ All colors MUST be HSL.
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
     
-    --gradient-primary: linear-gradient(135deg, hsl(211 100% 50%), hsl(211 100% 44%));
+    --gradient-primary: linear-gradient(135deg, hsl(211 100% 50%), hsl(224 76% 48%));
     --gradient-subtle: linear-gradient(180deg, hsl(0 0% 100%), hsl(210 40% 98%));
+
+    /* Per-module accent gradients (bolder, multi-colour design system) */
+    --gradient-brand: linear-gradient(135deg, hsl(211 100% 52%), hsl(258 89% 66%));
+    --gradient-violet: linear-gradient(135deg, hsl(258 89% 66%), hsl(292 84% 61%));
+    --gradient-amber: linear-gradient(135deg, hsl(38 92% 50%), hsl(21 90% 52%));
+    --gradient-emerald: linear-gradient(135deg, hsl(160 84% 39%), hsl(173 80% 40%));
+    --gradient-rose: linear-gradient(135deg, hsl(347 89% 60%), hsl(330 81% 60%));
+
+    /* Extra status colours */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
     
     --shadow-sm: 0 1px 2px 0 hsl(215 25% 27% / 0.05);
     --shadow-md: 0 4px 6px -1px hsl(215 25% 27% / 0.1);
@@ -97,6 +110,18 @@ All colors MUST be HSL.
     --border: 215 25% 27%;
     --input: 215 25% 27%;
     --ring: 211 100% 50%;
+
+    --gradient-brand: linear-gradient(135deg, hsl(211 100% 55%), hsl(258 89% 70%));
+    --gradient-violet: linear-gradient(135deg, hsl(258 89% 70%), hsl(292 84% 65%));
+    --gradient-amber: linear-gradient(135deg, hsl(38 92% 55%), hsl(21 90% 57%));
+    --gradient-emerald: linear-gradient(135deg, hsl(160 84% 44%), hsl(173 80% 45%));
+    --gradient-rose: linear-gradient(135deg, hsl(347 89% 65%), hsl(330 81% 65%));
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 55%;
+    --info-foreground: 0 0% 100%;
+
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
