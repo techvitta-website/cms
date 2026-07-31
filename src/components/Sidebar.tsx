@@ -109,7 +109,7 @@ export const menuSections: MenuSection[] = [
       { icon: ShieldCheck, label: "CID Verification", path: "/document-verification" },
       { icon: FileCheck, label: "Offer Letter", path: "/offer-letter" },
       { icon: Award, label: "Experience Letter", path: "/experience-letter" },
-      { icon: FileX2, label: "Rejection Letter", path: "/rejection-letter" },
+      { icon: FileX2, label: "Rejection/Feedback Letter", path: "/rejection-letter" },
     ],
   },
   {

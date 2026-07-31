@@ -71,7 +71,7 @@ export default function RejectionLetter() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Rejection Letter</h1>
+        <h1 className="text-3xl font-bold text-foreground">Rejection/Feedback Letter</h1>
         <p className="text-muted-foreground mt-1">
           Generate and send rejection letters to candidates not approved in feedback.
         </p>
