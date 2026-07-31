@@ -594,6 +594,7 @@ export default function Shortlist() {
                 <SelectContent>
                   <SelectItem value="Pending">Pending</SelectItem>
                   <SelectItem value="Shortlisted">Shortlisted</SelectItem>
+                  <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
                 </SelectContent>
               </Select>
               {updatingStatus === candidate.id && (

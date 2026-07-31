@@ -113,7 +113,7 @@ export default function Interview() {
             job_title
           )
         `)
-        .eq("status", "Shortlisted")
+        .in("status", ["Shortlisted", "Interview Scheduled"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
