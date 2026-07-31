@@ -51,37 +51,27 @@ export default function CandidateCard({
   if (variant === "row") {
     return (
       <Card className="hover:shadow-md transition-shadow">
-        <CardContent className="p-3 sm:p-4">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-4">
-            <h3 className="text-sm sm:text-base font-semibold text-foreground truncate lg:w-52 shrink-0">
+        <CardContent className="p-2.5 sm:p-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h3 className="text-sm sm:text-base font-semibold text-foreground truncate min-w-[140px] max-w-[220px]">
               {fullName}
             </h3>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs sm:text-sm text-muted-foreground flex-1 min-w-0">
-              <span className="truncate">
-                <span className="font-medium">Email:</span> {email}
+            {appliedJob && (
+              <span className="text-xs sm:text-sm text-muted-foreground truncate max-w-[220px]">
+                <span className="font-medium">Job:</span> {appliedJob}
               </span>
-              {phone && (
-                <span className="whitespace-nowrap">
-                  <span className="font-medium">Phone:</span> {phone}
-                </span>
-              )}
-              {appliedJob && (
-                <span className="truncate">
-                  <span className="font-medium">Job:</span> {appliedJob}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {getStatusBadge(status)}
-              {resumeUrl && (
-                <Button variant="outline" size="sm" onClick={onViewResume} className="flex items-center gap-2">
-                  <ExternalLink className="h-4 w-4" />
-                  <span className="hidden sm:inline">Resume</span>
-                </Button>
-              )}
-            </div>
+            )}
+            {getStatusBadge(status)}
+            {resumeUrl && (
+              <Button variant="outline" size="sm" onClick={onViewResume} className="flex items-center gap-2 h-8">
+                <ExternalLink className="h-4 w-4" />
+                <span className="hidden sm:inline">Resume</span>
+              </Button>
+            )}
+            {children && (
+              <div className="flex flex-wrap items-center gap-2 ml-auto">{children}</div>
+            )}
           </div>
-          {children && <div className="mt-3 pt-3 border-t border-border">{children}</div>}
         </CardContent>
       </Card>
     );

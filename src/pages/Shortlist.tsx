@@ -583,79 +583,63 @@ export default function Shortlist() {
                 candidate.resume_url && handleViewResume(candidate.resume_url)
               }
             >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
-                <label className="text-sm font-medium whitespace-nowrap">Status:</label>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Select
-                    value={candidate.status || "Pending"}
-                    onValueChange={(value) =>
-                      handleStatusChange(candidate.id, value)
-                    }
-                    disabled={updatingStatus === candidate.id}
-                  >
-                    <SelectTrigger className="w-full sm:w-[180px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Pending">Pending</SelectItem>
-                      <SelectItem value="Shortlisted">Shortlisted</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {updatingStatus === candidate.id && (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2 w-full">
-                <label className="text-sm font-medium">Comment:</label>
-                <Textarea
-                  placeholder="Add a note for this candidate"
-                  value={commentDrafts[candidate.id] ?? ""}
-                  onChange={(e) => handleCommentChange(candidate.id, e.target.value)}
-                  rows={3}
-                />
-                <div className="flex flex-col sm:flex-row justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleSendShortlistEmail(candidate)}
-                    disabled={
-                      sendingEmailId === candidate.id ||
-                      sendShortlistEmailMutation.isPending
-                    }
-                    className="w-full sm:w-auto"
-                  >
-                    {sendingEmailId === candidate.id ||
-                    sendShortlistEmailMutation.isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Mail className="h-4 w-4 mr-2" />
-                        Send Mail
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={savingCommentId === candidate.id}
-                    onClick={() => handleSaveComment(candidate.id)}
-                    className="w-full sm:w-auto"
-                  >
-                    {savingCommentId === candidate.id ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      "Save Comment"
-                    )}
-                  </Button>
-                </div>
-              </div>
+              <Select
+                value={candidate.status || "Pending"}
+                onValueChange={(value) => handleStatusChange(candidate.id, value)}
+                disabled={updatingStatus === candidate.id}
+              >
+                <SelectTrigger className="h-8 w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Pending">Pending</SelectItem>
+                  <SelectItem value="Shortlisted">Shortlisted</SelectItem>
+                </SelectContent>
+              </Select>
+              {updatingStatus === candidate.id && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+              <Input
+                className="h-8 w-[180px]"
+                placeholder="Comment"
+                value={commentDrafts[candidate.id] ?? ""}
+                onChange={(e) => handleCommentChange(candidate.id, e.target.value)}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => void handleSendShortlistEmail(candidate)}
+                disabled={sendingEmailId === candidate.id || sendShortlistEmailMutation.isPending}
+              >
+                {sendingEmailId === candidate.id || sendShortlistEmailMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Send Mail
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8"
+                disabled={savingCommentId === candidate.id}
+                onClick={() => handleSaveComment(candidate.id)}
+              >
+                {savingCommentId === candidate.id ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </Button>
             </CandidateCard>
           ))
         )}
