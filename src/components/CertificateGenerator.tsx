@@ -43,27 +43,21 @@ export interface CertificateCandidate {
   phone?: string | null;
   feedback_rating?: number | null;
   feedback_decision?: "Approve" | "Reject" | null;
+  // Internship period from the candidate's issued offer letter — the certificate
+  // pre-fills with these exact dates.
+  internship_start?: string | null;
+  internship_end?: string | null;
+  offer_position?: string | null;
   jobs?: { job_title: string; department?: string | null } | null;
 }
 
-// Working-feedback badge — the feedback that makes a candidate eligible.
-function FeedbackBadge({
-  decision,
-  rating,
-}: {
-  decision?: "Approve" | "Reject" | null;
-  rating?: number | null;
-}) {
-  if (!decision && !rating) return null;
-  const approved = decision === "Approve";
-  const cls = approved
-    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-    : "bg-muted text-muted-foreground";
-  const stars = rating ? ` · ${"★".repeat(Math.max(0, Math.min(5, Math.round(rating))))}` : "";
+// Internship-period chip — the offer window that makes a candidate eligible.
+function InternshipBadge({ start, end }: { start?: string | null; end?: string | null }) {
+  if (!start && !end) return null;
+  const fmt = (d?: string | null) => (d ? format(new Date(d), "dd MMM yyyy") : "—");
   return (
-    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      {approved ? "Feedback: Approved" : `Feedback: ${decision ?? "—"}`}
-      {stars}
+    <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+      Internship: {fmt(start)} – {fmt(end)}
     </span>
   );
 }
@@ -316,7 +310,7 @@ export default function CertificateGenerator({
 
   const openFor = (c: CertificateCandidate) => {
     setCandidate(c);
-    const position = c.jobs?.job_title || "Intern";
+    const position = c.offer_position || c.jobs?.job_title || "Intern";
     setSummaryEdited(false);
     setForm({
       salutation: "Mr.",
@@ -324,8 +318,9 @@ export default function CertificateGenerator({
       email: c.email ?? "",
       position,
       summary: defaultSummary("Mr.", position),
-      startDate: "",
-      endDate: "",
+      // Pre-fill the internship window from the issued offer; HR can still edit.
+      startDate: c.internship_start ?? "",
+      endDate: c.internship_end ?? "",
       issueDate: format(new Date(), "yyyy-MM-dd"),
       title: "Certificate Of Experience",
     });
@@ -477,6 +472,8 @@ export default function CertificateGenerator({
       setDialogOpen(false);
       setCandidate(null);
       queryClient.invalidateQueries({ queryKey: ["experience-letters-history"] });
+      // Refresh eligibility so the just-issued candidate drops off (unique).
+      queryClient.invalidateQueries({ queryKey: ["all-candidates-for-experience"] });
     },
     onError: (error: any) => {
       toast({
@@ -522,7 +519,7 @@ export default function CertificateGenerator({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-foreground truncate">{c.full_name}</p>
-                  <FeedbackBadge decision={c.feedback_decision} rating={c.feedback_rating} />
+                  <InternshipBadge start={c.internship_start} end={c.internship_end} />
                 </div>
                 <p className="text-sm text-muted-foreground truncate">
                   {c.email}

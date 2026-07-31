@@ -41,6 +41,10 @@ interface Candidate {
   feedback_rating?: number | null;
   feedback_decision?: "Approve" | "Reject" | null;
   document_verification_status?: string | null;
+  // Populated from the candidate's issued offer letter (offer-letters table).
+  internship_start?: string | null;
+  internship_end?: string | null;
+  offer_position?: string | null;
   jobs?: {
     job_title: string;
     department: string | null;
@@ -89,12 +93,57 @@ export default function ExperienceLetter() {
   const [activeTab, setActiveTab] = useState("generate");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
 
-  // Experience letters/certificates follow working feedback: only candidates
-  // approved in feedback (feedback_decision = 'Approve', or the canonical status
-  // 'Approved') are eligible. Their feedback is shown per candidate.
+  // An experience letter is issued at the END of an internship — so eligibility
+  // is NOT the interview feedback decision. A candidate is eligible only when:
+  //   1. an offer was issued (a row exists in offer-letters), AND
+  //   2. the internship closing date (offer end_date) is today or earlier, AND
+  //   3. they do not already have an experience letter (one per candidate).
+  // The internship dates from the offer are attached so the certificate
+  // pre-fills with the exact offer period.
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["all-candidates-for-experience"],
     queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+
+      // 1. Offers whose internship closing date has passed (offer issued + closed).
+      const { data: offers, error: offersError } = await (supabase.from("offer-letters") as any)
+        .select("candidate_id, position, start_date, end_date")
+        .not("candidate_id", "is", null)
+        .lte("end_date", today)
+        .order("end_date", { ascending: false });
+      if (offersError) throw offersError;
+
+      // Latest passed offer per candidate.
+      const offerByCandidate = new Map<
+        string,
+        { start_date: string | null; end_date: string | null; position: string | null }
+      >();
+      (offers ?? []).forEach((o: any) => {
+        if (o.candidate_id && !offerByCandidate.has(o.candidate_id)) {
+          offerByCandidate.set(o.candidate_id, {
+            start_date: o.start_date,
+            end_date: o.end_date,
+            position: o.position,
+          });
+        }
+      });
+
+      if (offerByCandidate.size === 0) return [] as Candidate[];
+
+      // 2. Candidates who already have an experience letter — excluded (unique).
+      const { data: issued, error: issuedError } = await (supabase.from("experience-letters") as any)
+        .select("candidate_id");
+      if (issuedError) throw issuedError;
+      const issuedSet = new Set(
+        (issued ?? []).map((i: any) => i.candidate_id).filter(Boolean),
+      );
+
+      const eligibleIds = Array.from(offerByCandidate.keys()).filter(
+        (id) => !issuedSet.has(id),
+      );
+      if (eligibleIds.length === 0) return [] as Candidate[];
+
+      // 3. Candidate details for the eligible set.
       const { data, error } = await supabase
         .from("candidates")
         .select(`
@@ -113,11 +162,21 @@ export default function ExperienceLetter() {
             department
           )
         `)
-        .or("feedback_decision.eq.Approve,status.eq.Approved")
+        .in("id", eligibleIds)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return (data ?? []) as unknown as Candidate[];
+
+      // Attach the offer's internship period for prefill + display.
+      return ((data ?? []) as unknown as Candidate[]).map((c) => {
+        const o = offerByCandidate.get(c.id);
+        return {
+          ...c,
+          internship_start: o?.start_date ?? null,
+          internship_end: o?.end_date ?? null,
+          offer_position: o?.position ?? null,
+        };
+      });
     },
   });
 
@@ -841,7 +900,7 @@ export default function ExperienceLetter() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Experience Letter</h1>
           <p className="text-muted-foreground mt-1">
-            Upload and send experience letters for candidates
+            For interns whose offer was issued and whose internship closing date has passed — one certificate per intern
           </p>
         </div>
         <Button 
@@ -893,7 +952,7 @@ export default function ExperienceLetter() {
       <div className="grid gap-6">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm ? "No candidates found matching your search." : "No candidates found."}</p>
+            <p>{searchTerm ? "No candidates found matching your search." : "No interns are eligible yet. A candidate appears here once their offer is issued and their internship closing date has passed (and they don't already have an experience letter)."}</p>
           </div>
         ) : (
           filteredCandidates.map((candidate) => (
