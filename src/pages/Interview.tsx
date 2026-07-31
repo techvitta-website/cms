@@ -151,6 +151,7 @@ export default function Interview() {
   const [quickMode, setQuickMode] = useState<"new" | "reschedule">("new");
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
   const [stageView, setStageView] = useState<"awaiting" | "scheduled" | "all">("awaiting");
+  const [calendarSelected, setCalendarSelected] = useState<Date>(() => startOfDay(new Date()));
 
   // Fetch only candidates whose interview is scheduled (clean stage split — a
   // shortlisted candidate lives on the Shortlist page until they are advanced
@@ -838,6 +839,79 @@ export default function Interview() {
         ? scheduledList
         : filteredCandidates;
 
+  // Calendar view: group interviews by day and list upcoming ("active") ones.
+  const interviewsByDay = useMemo(() => {
+    const m = new Map<string, any[]>();
+    (interviewHistory as any[]).forEach((iv) => {
+      if (!iv.interview_date) return;
+      const key = format(new Date(iv.interview_date), "yyyy-MM-dd");
+      const arr = m.get(key) || [];
+      arr.push(iv);
+      m.set(key, arr);
+    });
+    return m;
+  }, [interviewHistory]);
+
+  const daysWithInterviews = useMemo(
+    () => Array.from(interviewsByDay.keys()).map((k) => new Date(`${k}T00:00:00`)),
+    [interviewsByDay],
+  );
+
+  const selectedDayInterviews = useMemo(() => {
+    const key = format(calendarSelected, "yyyy-MM-dd");
+    return [...(interviewsByDay.get(key) || [])].sort(
+      (a, b) => new Date(a.interview_date).getTime() - new Date(b.interview_date).getTime(),
+    );
+  }, [interviewsByDay, calendarSelected]);
+
+  const upcomingInterviews = useMemo(() => {
+    const start = startOfDay(new Date());
+    return (interviewHistory as any[])
+      .filter((iv) => iv.interview_date && new Date(iv.interview_date) >= start)
+      .sort((a, b) => new Date(a.interview_date).getTime() - new Date(b.interview_date).getTime());
+  }, [interviewHistory]);
+
+  const renderInterviewItem = (iv: any) => {
+    const dt = new Date(iv.interview_date);
+    const link = extractMeetingLink(iv.notes);
+    const name = iv.candidates?.full_name || iv.candidate_name || "Candidate";
+    const email = iv.candidates?.email as string | undefined;
+    const job = iv.candidates?.jobs?.job_title as string | undefined;
+    return (
+      <div
+        key={iv.id}
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2"
+      >
+        <span className="text-sm font-semibold w-[92px] shrink-0">
+          {format(dt, "MMM dd, HH:mm")}
+        </span>
+        <span className="text-sm font-medium">{name}</span>
+        {job && <span className="text-xs text-muted-foreground">· {job}</span>}
+        <Badge
+          variant={iv.interview_mode === "Online" ? "default" : "secondary"}
+          className="text-xs"
+        >
+          {iv.interview_mode || "—"}
+        </Badge>
+        {iv.interview_panel && (
+          <span className="text-xs text-muted-foreground">Panel: {iv.interview_panel}</span>
+        )}
+        {email && <span className="text-xs text-muted-foreground hidden sm:inline">{email}</span>}
+        {link && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 ml-auto"
+            onClick={() => window.open(link, "_blank", "noopener,noreferrer")}
+          >
+            <Video className="h-3.5 w-3.5 mr-1" />
+            Join
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -856,10 +930,14 @@ export default function Interview() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="schedule" className="flex items-center gap-2">
             <CalendarIcon className="h-4 w-4" />
-            Schedule Interview
+            Schedule
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4" />
+            Calendar ({upcomingInterviews.length})
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
@@ -1364,6 +1442,67 @@ export default function Interview() {
           )}
         </DialogContent>
       </Dialog>
+        </TabsContent>
+
+        <TabsContent value="calendar" className="mt-6">
+          <div className="grid gap-6 lg:grid-cols-[auto_1fr]">
+            <Card className="w-fit h-fit">
+              <CardContent className="p-3">
+                <Calendar
+                  mode="single"
+                  selected={calendarSelected}
+                  onSelect={(d) => d && setCalendarSelected(d)}
+                  modifiers={{ hasInterview: daysWithInterviews }}
+                  modifiersClassNames={{
+                    hasInterview:
+                      "relative font-semibold text-primary after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-primary",
+                  }}
+                  initialFocus
+                />
+                <p className="text-xs text-muted-foreground mt-2 px-1">
+                  Dots mark days with interviews.
+                </p>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-6 min-w-0">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">
+                    {format(calendarSelected, "EEEE, MMM dd, yyyy")} ({selectedDayInterviews.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {selectedDayInterviews.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No interviews on this day.</p>
+                  ) : (
+                    <div className="space-y-2">{selectedDayInterviews.map(renderInterviewItem)}</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CalendarIcon className="h-4 w-4" />
+                    Upcoming interviews ({upcomingInterviews.length})
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    All active interviews from today onward.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {upcomingInterviews.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No upcoming interviews.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {upcomingInterviews.slice(0, 25).map(renderInterviewItem)}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="history" className="mt-6">
