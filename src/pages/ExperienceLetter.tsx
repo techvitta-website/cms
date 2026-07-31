@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import CertificateGenerator from "@/components/CertificateGenerator";
 
 interface Candidate {
   id: string;
@@ -844,16 +845,24 @@ export default function ExperienceLetter() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
           <TabsTrigger value="upload" className="flex items-center gap-2">
             <Upload className="h-4 w-4" />
             Upload Experience Letter
+          </TabsTrigger>
+          <TabsTrigger value="generate" className="flex items-center gap-2">
+            <Award className="h-4 w-4" />
+            Generate Certificate
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             History ({experienceLettersHistory.length})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="generate" className="mt-6">
+          <CertificateGenerator candidates={candidates} isLoading={isLoading} />
+        </TabsContent>
 
         <TabsContent value="upload" className="space-y-6 mt-6">
       {/* Search Bar */}
