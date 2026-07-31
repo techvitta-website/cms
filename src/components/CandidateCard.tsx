@@ -53,17 +53,27 @@ export default function CandidateCard({
       <Card className="hover:shadow-md transition-shadow">
         <CardContent className="p-2.5 sm:p-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h3 className="text-sm sm:text-base font-semibold text-foreground truncate min-w-[140px] max-w-[220px]">
+            {/* Fixed-width columns so rows line up tidily and are easy to scan/filter. */}
+            <h3
+              className="text-sm sm:text-base font-semibold text-foreground truncate w-full sm:w-[160px] shrink-0"
+              title={fullName}
+            >
               {fullName}
             </h3>
-            {appliedJob && (
-              <span className="text-xs sm:text-sm text-muted-foreground truncate max-w-[220px]">
-                <span className="font-medium">Job:</span> {appliedJob}
-              </span>
-            )}
-            {getStatusBadge(status)}
+            <span
+              className="text-xs sm:text-sm text-muted-foreground truncate sm:w-[170px] shrink-0"
+              title={appliedJob || undefined}
+            >
+              {appliedJob || "—"}
+            </span>
+            <span className="sm:w-[130px] shrink-0">{getStatusBadge(status)}</span>
             {resumeUrl && (
-              <Button variant="outline" size="sm" onClick={onViewResume} className="flex items-center gap-2 h-8">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onViewResume}
+                className="flex items-center gap-2 h-8 shrink-0"
+              >
                 <ExternalLink className="h-4 w-4" />
                 <span className="hidden sm:inline">Resume</span>
               </Button>

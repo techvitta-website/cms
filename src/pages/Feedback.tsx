@@ -23,6 +23,12 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Edit, Trash2, Mail, Search, History, MessageSquare } from "lucide-react";
 import { openResume } from "@/lib/resume";
+import CandidateFilterBar, {
+  filterAndSortCandidates,
+  jobOptionsFrom,
+  statusOptionsFrom,
+  type CandidateSort,
+} from "@/components/CandidateFilterBar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
@@ -36,6 +42,7 @@ interface Candidate {
   resume_url: string | null;
   status: string;
   job_id: string | null;
+  created_at?: string | null;
   feedback_rating?: number | null;
   feedback_notes?: string | null;
   feedback_decision?: "Approve" | "Reject" | null;
@@ -91,6 +98,12 @@ export default function Feedback() {
   });
   const [searchTerm, setSearchTerm] = useState("");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [jobFilter, setJobFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState<CandidateSort>("date-desc");
+  const [historyJobFilter, setHistoryJobFilter] = useState("all");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
+  const [historySort, setHistorySort] = useState<CandidateSort>("date-desc");
   const [activeTab, setActiveTab] = useState("pending");
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
   const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
@@ -110,6 +123,7 @@ export default function Feedback() {
           resume_url,
           status,
           job_id,
+          created_at,
           feedback_rating,
           feedback_notes,
           feedback_decision,
@@ -140,6 +154,7 @@ export default function Feedback() {
           resume_url,
           status,
           job_id,
+          created_at,
           feedback_rating,
           feedback_notes,
           feedback_decision,
@@ -540,30 +555,42 @@ export default function Feedback() {
     }
   };
 
-  // Filter candidates based on search term (for pending feedback)
-  const filteredCandidates = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return candidates;
-    }
-    
-    const searchLower = searchTerm.toLowerCase();
-    return candidates.filter((candidate) => {
-      const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
-      const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
-      const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
-      const jobMatch = candidate.jobs?.job_title?.toLowerCase().includes(searchLower);
-      return nameMatch || emailMatch || phoneMatch || jobMatch;
-    });
-  }, [candidates, searchTerm]);
+  // Options for the pending-feedback filter dropdowns.
+  const jobOptions = useMemo(() => jobOptionsFrom(candidates), [candidates]);
+  const statusOptions = useMemo(() => statusOptionsFrom(candidates), [candidates]);
 
-  // Filter feedback history based on search term
+  // Options for the history filter dropdowns.
+  const historyJobOptions = useMemo(() => jobOptionsFrom(feedbackHistory), [feedbackHistory]);
+  const historyStatusOptions = useMemo(
+    () => statusOptionsFrom(feedbackHistory),
+    [feedbackHistory],
+  );
+
+  // Filter + sort pending candidates (search term, job, status, sort).
+  const filteredCandidates = useMemo(
+    () =>
+      filterAndSortCandidates(candidates, {
+        searchTerm,
+        jobFilter,
+        statusFilter,
+        sort,
+      }),
+    [candidates, searchTerm, jobFilter, statusFilter, sort],
+  );
+
+  // Filter + sort feedback history (also matches on feedback notes; sorts by
+  // the date feedback was submitted).
   const filteredFeedbackHistory = useMemo(() => {
-    if (!historySearchTerm.trim()) {
-      return feedbackHistory;
-    }
-    
+    const base = filterAndSortCandidates(feedbackHistory, {
+      searchTerm: "",
+      jobFilter: historyJobFilter,
+      statusFilter: historyStatusFilter,
+      sort: historySort,
+      dateField: (c) => c.feedback_submitted_at,
+    });
+    if (!historySearchTerm.trim()) return base;
     const searchLower = historySearchTerm.toLowerCase();
-    return feedbackHistory.filter((candidate) => {
+    return base.filter((candidate) => {
       const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
       const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
       const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
@@ -571,7 +598,7 @@ export default function Feedback() {
       const feedbackMatch = candidate.feedback_notes?.toLowerCase().includes(searchLower);
       return nameMatch || emailMatch || phoneMatch || jobMatch || feedbackMatch;
     });
-  }, [feedbackHistory, historySearchTerm]);
+  }, [feedbackHistory, historySearchTerm, historyJobFilter, historyStatusFilter, historySort]);
 
   if (isLoading) {
     return (
@@ -620,11 +647,21 @@ export default function Feedback() {
               className="pl-9"
             />
           </div>
+          <CandidateFilterBar
+            jobOptions={jobOptions}
+            jobFilter={jobFilter}
+            onJobChange={setJobFilter}
+            statusOptions={statusOptions}
+            statusFilter={statusFilter}
+            onStatusChange={setStatusFilter}
+            sort={sort}
+            onSortChange={setSort}
+          />
         </div>
 
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg">
-            <p>{searchTerm ? "No candidates found matching your search." : "No candidates with scheduled interviews found. Schedule interviews first to submit feedback."}</p>
+            <p>{searchTerm || jobFilter !== "all" || statusFilter !== "all" ? "No candidates found matching your filters." : "No candidates with scheduled interviews found. Schedule interviews first to submit feedback."}</p>
           </div>
         ) : (          <div className="grid gap-3 sm:gap-4">
             {filteredCandidates.map((candidate) => (
@@ -779,6 +816,16 @@ export default function Feedback() {
               className="pl-9"
             />
         </div>
+          <CandidateFilterBar
+            jobOptions={historyJobOptions}
+            jobFilter={historyJobFilter}
+            onJobChange={setHistoryJobFilter}
+            statusOptions={historyStatusOptions}
+            statusFilter={historyStatusFilter}
+            onStatusChange={setHistoryStatusFilter}
+            sort={historySort}
+            onSortChange={setHistorySort}
+          />
         </div>
 
         {isHistoryLoading ? (

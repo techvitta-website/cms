@@ -31,6 +31,11 @@ import { CalendarIcon, Clock, Loader2, Mail, Search, History, ExternalLink, Vide
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { openResume } from "@/lib/resume";
+import CandidateFilterBar, {
+  filterAndSortCandidates,
+  jobOptionsFrom,
+  type CandidateSort,
+} from "@/components/CandidateFilterBar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -51,6 +56,7 @@ interface Candidate {
   resume_url: string | null;
   status: string;
   job_id: string | null;
+  created_at?: string | null;
   jobs?: {
     job_title: string;
   } | null;
@@ -94,8 +100,12 @@ export default function Interview() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("schedule");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [jobFilter, setJobFilter] = useState("all");
+  const [sort, setSort] = useState<CandidateSort>("date-desc");
 
-  // Fetch only shortlisted candidates
+  // Fetch only candidates whose interview is scheduled (clean stage split — a
+  // shortlisted candidate lives on the Shortlist page until they are advanced
+  // here, at which point they leave Shortlist and appear only on this page).
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["shortlisted-candidates"],
     queryFn: async () => {
@@ -109,11 +119,12 @@ export default function Interview() {
           resume_url,
           status,
           job_id,
+          created_at,
           jobs (
             job_title
           )
         `)
-        .in("status", ["Shortlisted", "Interview Scheduled"])
+        .eq("status", "Interview Scheduled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -458,21 +469,19 @@ export default function Interview() {
     });
   }, [interviewHistory, historySearchTerm]);
 
-  // Filter candidates based on search term
-  const filteredCandidates = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return candidates;
-    }
-    
-    const searchLower = searchTerm.toLowerCase();
-    return candidates.filter((candidate) => {
-      const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
-      const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
-      const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
-      const jobMatch = candidate.jobs?.job_title?.toLowerCase().includes(searchLower);
-      return nameMatch || emailMatch || phoneMatch || jobMatch;
-    });
-  }, [candidates, searchTerm]);
+  // Job options for the filter dropdown, derived from the loaded candidates.
+  const jobOptions = useMemo(() => jobOptionsFrom(candidates), [candidates]);
+
+  // Filter + sort candidates (search term, job filter, chosen sort order).
+  const filteredCandidates = useMemo(
+    () =>
+      filterAndSortCandidates(candidates, {
+        searchTerm,
+        jobFilter,
+        sort,
+      }),
+    [candidates, searchTerm, jobFilter, sort],
+  );
 
   if (isLoading) {
     return (
@@ -518,12 +527,19 @@ export default function Interview() {
             className="pl-9"
           />
         </div>
+        <CandidateFilterBar
+          jobOptions={jobOptions}
+          jobFilter={jobFilter}
+          onJobChange={setJobFilter}
+          sort={sort}
+          onSortChange={setSort}
+        />
       </div>
 
       <div className="grid gap-3 sm:gap-4">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm ? "No candidates found matching your search." : "No shortlisted candidates found. Shortlist candidates first to schedule interviews."}</p>
+            <p>{searchTerm || jobFilter !== "all" ? "No candidates found matching your filters." : "No candidates with a scheduled interview yet. Advance shortlisted candidates from the Shortlist page to schedule interviews."}</p>
           </div>
         ) : (
           filteredCandidates.map((candidate) => (

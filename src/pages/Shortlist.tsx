@@ -16,6 +16,12 @@ import {
 } from "@/components/ui/select";
 import { Loader2, Mail, Search, History, MessageSquare } from "lucide-react";
 import { openResume } from "@/lib/resume";
+import CandidateFilterBar, {
+  filterAndSortCandidates,
+  jobOptionsFrom,
+  statusOptionsFrom,
+  type CandidateSort,
+} from "@/components/CandidateFilterBar";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +51,7 @@ interface Candidate {
   resume_url: string | null;
   status: string;
   job_id: string | null;
+  created_at?: string | null;
   shortlist_comment?: string | null;
   jobs?: {
     job_title: string;
@@ -79,6 +86,9 @@ export default function Shortlist() {
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState("");
+  const [jobFilter, setJobFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState<CandidateSort>("date-desc");
   const [activeTab, setActiveTab] = useState<"shortlist" | "history">("shortlist");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -103,6 +113,7 @@ export default function Shortlist() {
           resume_url,
           status,
           job_id,
+          created_at,
           shortlist_comment,
           jobs (
             job_title
@@ -493,21 +504,21 @@ export default function Shortlist() {
     });
   }, [shortlistHistory, historySearchTerm]);
 
-  // Filter candidates based on search term
-  const filteredCandidates = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return candidates;
-    }
-    
-    const searchLower = searchTerm.toLowerCase();
-    return candidates.filter((candidate) => {
-      const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
-      const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
-      const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
-      const jobMatch = candidate.jobs?.job_title?.toLowerCase().includes(searchLower);
-      return nameMatch || emailMatch || phoneMatch || jobMatch;
-    });
-  }, [candidates, searchTerm]);
+  // Options for the filter dropdowns, derived from the loaded candidates.
+  const jobOptions = useMemo(() => jobOptionsFrom(candidates), [candidates]);
+  const statusOptions = useMemo(() => statusOptionsFrom(candidates), [candidates]);
+
+  // Filter + sort candidates (search term, job filter, status filter, sort).
+  const filteredCandidates = useMemo(
+    () =>
+      filterAndSortCandidates(candidates, {
+        searchTerm,
+        jobFilter,
+        statusFilter,
+        sort,
+      }),
+    [candidates, searchTerm, jobFilter, statusFilter, sort],
+  );
 
   if (isLoading) {
     return (
@@ -560,12 +571,22 @@ export default function Shortlist() {
             className="pl-9 text-sm sm:text-base"
           />
         </div>
+        <CandidateFilterBar
+          jobOptions={jobOptions}
+          jobFilter={jobFilter}
+          onJobChange={setJobFilter}
+          statusOptions={statusOptions}
+          statusFilter={statusFilter}
+          onStatusChange={setStatusFilter}
+          sort={sort}
+          onSortChange={setSort}
+        />
       </div>
 
       <div className="grid gap-3 sm:gap-4">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm ? "No candidates found matching your search." : "No candidates found. Upload resumes to see candidates here."}</p>
+            <p>{searchTerm || jobFilter !== "all" || statusFilter !== "all" ? "No candidates found matching your filters." : "No candidates found. Upload resumes to see candidates here."}</p>
           </div>
         ) : (
           filteredCandidates.map((candidate) => (
