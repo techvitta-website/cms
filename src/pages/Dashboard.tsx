@@ -58,6 +58,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import AIScreeningStatus from "@/components/AIScreeningStatus";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -2897,6 +2898,8 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      <AIScreeningStatus />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
