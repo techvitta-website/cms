@@ -13,6 +13,27 @@ interface CandidateCardProps {
   status?: string;
   onViewResume?: () => void;
   children?: React.ReactNode;
+  // "card" (default) = the tall card layout. "row" = a compact single-line
+  // layout with all candidate info on one row (easier to scan/filter), with any
+  // action controls (children) below a divider.
+  variant?: "card" | "row";
+}
+
+function getStatusBadge(status?: string) {
+  if (!status) return null;
+  const statusColors: Record<string, string> = {
+    Pending: "bg-yellow-100 text-yellow-800",
+    Shortlisted: "bg-blue-100 text-blue-800",
+    "Interview Scheduled": "bg-purple-100 text-purple-800",
+    Rejected: "bg-red-100 text-red-800",
+    Approved: "bg-green-100 text-green-800",
+    "Offer Released": "bg-indigo-100 text-indigo-800",
+  };
+  return (
+    <Badge className={statusColors[status] || "bg-gray-100 text-gray-800"}>
+      {status}
+    </Badge>
+  );
 }
 
 export default function CandidateCard({
@@ -25,21 +46,46 @@ export default function CandidateCard({
   status,
   onViewResume,
   children,
+  variant = "card",
 }: CandidateCardProps) {
-  const getStatusBadge = (status?: string) => {
-    if (!status) return null;
-    const statusColors: Record<string, string> = {
-      Pending: "bg-yellow-100 text-yellow-800",
-      Shortlisted: "bg-blue-100 text-blue-800",
-      Rejected: "bg-red-100 text-red-800",
-      Approved: "bg-green-100 text-green-800",
-    };
+  if (variant === "row") {
     return (
-      <Badge className={statusColors[status] || "bg-gray-100 text-gray-800"}>
-        {status}
-      </Badge>
+      <Card className="hover:shadow-md transition-shadow">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-4">
+            <h3 className="text-sm sm:text-base font-semibold text-foreground truncate lg:w-52 shrink-0">
+              {fullName}
+            </h3>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs sm:text-sm text-muted-foreground flex-1 min-w-0">
+              <span className="truncate">
+                <span className="font-medium">Email:</span> {email}
+              </span>
+              {phone && (
+                <span className="whitespace-nowrap">
+                  <span className="font-medium">Phone:</span> {phone}
+                </span>
+              )}
+              {appliedJob && (
+                <span className="truncate">
+                  <span className="font-medium">Job:</span> {appliedJob}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {getStatusBadge(status)}
+              {resumeUrl && (
+                <Button variant="outline" size="sm" onClick={onViewResume} className="flex items-center gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  <span className="hidden sm:inline">Resume</span>
+                </Button>
+              )}
+            </div>
+          </div>
+          {children && <div className="mt-3 pt-3 border-t border-border">{children}</div>}
+        </CardContent>
+      </Card>
     );
-  };
+  }
 
   return (
     <Card className="hover:shadow-lg transition-shadow">

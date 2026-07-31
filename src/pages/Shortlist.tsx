@@ -562,7 +562,7 @@ export default function Shortlist() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>{searchTerm ? "No candidates found matching your search." : "No candidates found. Upload resumes to see candidates here."}</p>
@@ -570,6 +570,7 @@ export default function Shortlist() {
         ) : (
           filteredCandidates.map((candidate) => (
             <CandidateCard
+              variant="row"
               key={candidate.id}
               id={candidate.id}
               fullName={candidate.full_name}

@@ -520,7 +520,7 @@ export default function Interview() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>{searchTerm ? "No candidates found matching your search." : "No shortlisted candidates found. Shortlist candidates first to schedule interviews."}</p>
@@ -528,6 +528,7 @@ export default function Interview() {
         ) : (
           filteredCandidates.map((candidate) => (
             <CandidateCard
+              variant="row"
               key={candidate.id}
               id={candidate.id}
               fullName={candidate.full_name}
