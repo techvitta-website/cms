@@ -148,6 +148,7 @@ export default function Interview() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickCandidate, setQuickCandidate] = useState<Candidate | null>(null);
   const [quickForm, setQuickForm] = useState<QuickForm | null>(null);
+  const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
 
   // Fetch only candidates whose interview is scheduled (clean stage split — a
   // shortlisted candidate lives on the Shortlist page until they are advanced
@@ -538,6 +539,72 @@ export default function Interview() {
     return s;
   }, [interviewHistory]);
 
+  // Latest booked interview datetime per candidate — used to show whether an
+  // interview has actually been booked (vs just sitting in the interview stage).
+  const bookedByCandidate = useMemo(() => {
+    const m = new Map<string, string>();
+    (interviewHistory as any[]).forEach((iv) => {
+      if (iv.candidate_id && iv.interview_date) {
+        const prev = m.get(iv.candidate_id);
+        if (!prev || new Date(iv.interview_date) > new Date(prev)) {
+          m.set(iv.candidate_id, iv.interview_date);
+        }
+      }
+    });
+    return m;
+  }, [interviewHistory]);
+
+  // Move a candidate to a different pipeline stage from the Interview tab.
+  // Mainly used to send someone back to "Shortlisted" if the interview can't
+  // happen — they then leave this tab and reappear on the Shortlist page.
+  const updateStageMutation = useMutation({
+    mutationFn: async ({ candidate, newStatus }: { candidate: Candidate; newStatus: string }) => {
+      const { error } = await supabase
+        .from("candidates")
+        .update({ status: newStatus })
+        .eq("id", candidate.id);
+      if (error) throw error;
+
+      await supabase
+        .from("shortlist_records")
+        .update({ status: newStatus })
+        .eq("candidate_id", candidate.id);
+
+      await supabase.from("activity_logs").insert({
+        action: "STATUS_UPDATED",
+        details: `${candidate.full_name} moved to ${newStatus} from the Interview stage`,
+      });
+    },
+    onSuccess: (_, { newStatus }) => {
+      queryClient.invalidateQueries({ queryKey: ["shortlisted-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["shortlist-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["interviewed-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+      toast({
+        title: "Stage updated",
+        description:
+          newStatus === "Interview Scheduled"
+            ? "Candidate kept in the Interview stage."
+            : `Candidate moved to ${newStatus}.`,
+      });
+      setUpdatingStageId(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update stage",
+        variant: "destructive",
+      });
+      setUpdatingStageId(null);
+    },
+  });
+
+  const handleStageChange = (candidate: Candidate, newStatus: string) => {
+    if (newStatus === candidate.status) return;
+    setUpdatingStageId(candidate.id);
+    updateStageMutation.mutate({ candidate, newStatus });
+  };
+
   // Open the one-click quick-schedule dialog with an auto-picked slot and the
   // remembered default panel + company meeting link.
   const handleOpenQuick = (candidate: Candidate) => {
@@ -689,7 +756,7 @@ export default function Interview() {
       <div>
         <h1 className="text-3xl font-bold text-foreground">Interview Scheduling</h1>
         <p className="text-muted-foreground mt-1">
-          Schedule and manage interviews for shortlisted candidates
+          Book a slot for each candidate, or use the stage dropdown to send them back to Shortlist if the interview can't happen
         </p>
       </div>
 
@@ -750,7 +817,36 @@ export default function Interview() {
                 candidate.resume_url && handleViewResume(candidate.resume_url)
               }
             >
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
+                {(() => {
+                  const booked = bookedByCandidate.get(candidate.id);
+                  return booked ? (
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                      Interview: {format(new Date(booked), "MMM dd, HH:mm")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-amber-700 border-amber-300">
+                      Not booked yet
+                    </Badge>
+                  );
+                })()}
+                <Select
+                  value={candidate.status || "Interview Scheduled"}
+                  onValueChange={(value) => handleStageChange(candidate, value)}
+                  disabled={updatingStageId === candidate.id}
+                >
+                  <SelectTrigger className="h-9 w-[170px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pending">Pending</SelectItem>
+                    <SelectItem value="Shortlisted">Shortlisted (send back)</SelectItem>
+                    <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
+                  </SelectContent>
+                </Select>
+                {updatingStageId === candidate.id && (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                )}
                 <Button
                   variant="default"
                   className="bg-gradient-primary hover:opacity-90"
