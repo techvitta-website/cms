@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -28,14 +29,11 @@ import letterheadUrl from "@/assets/certificate/letterhead.png";
 import signatureUrl from "@/assets/certificate/signature.png";
 
 // ---------------------------------------------------------------------------
-// Internship certificate generator (ADDITIVE feature).
-// Replicates the official TechVitta certificate: the full-page letterhead
-// artwork (logo, dotted band, watermark, footer) extracted from the issued
-// sample is used as the sheet background, with the certificate text laid over
-// it. Wording follows "Tech Vita internship certificateTemplateNov2025.docx".
-// Flow: pick candidate -> fill details -> PREVIEW -> Generate & Send
-// (uploads the PDF to the experience-letters bucket, emails it via the
-// existing send-email function, records it in the letters history).
+// Internship experience-certificate generator (ADDITIVE). Matches the issued
+// "Certificate Of Experience" sample: company name centred, role + date range,
+// an editable work-summary paragraph, relieving confirmation, and the
+// signatory block — all on the official TechVitta letterhead.
+// Flow: pick candidate -> fill details -> PREVIEW -> Generate & Send / Download.
 // ---------------------------------------------------------------------------
 
 export interface CertificateCandidate {
@@ -46,34 +44,27 @@ export interface CertificateCandidate {
   jobs?: { job_title: string; department?: string | null } | null;
 }
 
+type Salutation = "Mr." | "Ms.";
+
 interface CertificateData {
-  salutation: "Mr." | "Ms.";
+  salutation: Salutation;
   fullName: string;
   email: string;
   position: string;
-  projectType: string;
-  projects: string;
+  summary: string;
   startDate: string;
   endDate: string;
   issueDate: string;
   title: string;
 }
 
-const EMPTY_FORM: CertificateData = {
-  salutation: "Mr.",
-  fullName: "",
-  email: "",
-  position: "",
-  projectType: "projects",
-  projects: "",
-  startDate: "",
-  endDate: "",
-  issueDate: format(new Date(), "yyyy-MM-dd"),
-  title: "Certificate Of Experience",
+const PRO: Record<Salutation, { s: string; o: string; p: string }> = {
+  "Mr.": { s: "He", o: "him", p: "his" },
+  "Ms.": { s: "She", o: "her", p: "her" },
 };
 
 const ordinalDate = (d: string) => (d ? format(new Date(d), "do MMMM yyyy") : "");
-const numericDate = (d: string) => (d ? format(new Date(d), "dd-MM-yyyy") : "");
+const relievedDate = (d: string) => (d ? format(new Date(d), "dd-MMM-yyyy") : "");
 const issueDateFmt = (d: string) => (d ? format(new Date(d), "dd-MMMM-yyyy") : "");
 
 const titleCaseName = (name: string) =>
@@ -83,11 +74,16 @@ const titleCaseName = (name: string) =>
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
 
+function defaultSummary(sal: Salutation): string {
+  const g = PRO[sal];
+  return `During ${g.p} internship, ${g.s.toLowerCase()} was actively involved in software development activities including backend development, API integrations, database management, debugging, testing, and deployment support. ${g.s} demonstrated strong analytical skills and a solid understanding of modern software development practices.`;
+}
+
 const PARAGRAPH: CSSProperties = {
-  fontSize: "15.5px",
+  fontSize: "15px",
   lineHeight: 1.55,
   textAlign: "justify",
-  margin: "0 0 26px 0",
+  margin: "0 0 22px 0",
 };
 
 // A4 sheet at 96dpi: 794 x 1123 px.
@@ -98,10 +94,7 @@ function CertificateSheet({
   data: CertificateData;
   innerRef?: React.Ref<HTMLDivElement>;
 }) {
-  const p =
-    data.salutation === "Ms."
-      ? { He: "She", him: "her" }
-      : { He: "He", him: "him" };
+  const g = PRO[data.salutation];
   return (
     <div
       ref={innerRef}
@@ -113,47 +106,35 @@ function CertificateSheet({
         backgroundImage: `url(${letterheadUrl})`,
         backgroundSize: "100% 100%",
         backgroundRepeat: "no-repeat",
-        fontFamily: "'Bookman Old Style', Georgia, 'Times New Roman', serif",
+        fontFamily: "Calibri, Arial, 'Segoe UI', sans-serif",
         color: "#000000",
         overflow: "hidden",
       }}
     >
-      {/* Company name sits in the letterhead band, centred */}
-      <div
-        style={{
-          position: "absolute",
-          top: 97,
-          left: 170,
-          right: 30,
-          textAlign: "center",
-          fontSize: 21,
-          letterSpacing: "0.5px",
-          fontFamily: "'Times New Roman', Georgia, serif",
-        }}
-      >
-        TECHVITTA INNOVATIONS PRIVATE LIMITED
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          top: 188,
-          right: 95,
-          fontSize: 14.5,
-          fontFamily: "Calibri, Arial, sans-serif",
-        }}
-      >
-        <b>Date:</b> {issueDateFmt(data.issueDate)}
-      </div>
-
-      <div style={{ position: "absolute", top: 312, left: 95, right: 95 }}>
+      <div style={{ position: "absolute", top: 165, left: 70, right: 70 }}>
+        {/* Company name — centred, below the letterhead band */}
         <div
           style={{
             textAlign: "center",
             fontSize: 20,
             fontWeight: 700,
-            textDecoration: "underline",
-            marginBottom: 48,
+            fontFamily: "Arial, Helvetica, sans-serif",
+            letterSpacing: "0.3px",
+          }}
+        >
+          TECHVITTA INNOVATIONS PRIVATE LIMITED
+        </div>
+        <div style={{ textAlign: "right", fontSize: 14, marginTop: 6 }}>
+          Date: {issueDateFmt(data.issueDate)}
+        </div>
+
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 22,
+            fontWeight: 700,
+            fontFamily: "Georgia, 'Times New Roman', serif",
+            margin: "24px 0 30px",
           }}
         >
           {data.title}
@@ -162,40 +143,42 @@ function CertificateSheet({
         <p style={PARAGRAPH}>
           This is to certify that{" "}
           <b>
-            {data.salutation} {data.fullName.toUpperCase()},
+            {data.salutation} {titleCaseName(data.fullName)},
           </b>{" "}
-          interned as a <b>{data.position}</b> with us in the {data.projectType}{" "}
-          <b>{data.projects}</b> modules from <b>{ordinalDate(data.startDate)}</b> to{" "}
-          <b>{ordinalDate(data.endDate)}.</b>
+          interned as a <b>{data.position}</b> with us from{" "}
+          <b>
+            {ordinalDate(data.startDate)} to {ordinalDate(data.endDate)}.
+          </b>
+        </p>
+
+        <p style={PARAGRAPH}>{data.summary}</p>
+
+        <p style={PARAGRAPH}>
+          This letter further confirms that {data.salutation} {titleCaseName(data.fullName)} has
+          been relieved from all duties and responsibilities as of the close of business on{" "}
+          {relievedDate(data.endDate)}, after successful completion of all internship requirements.
+          There are no dues or obligations pending against {g.o} as on date.
         </p>
 
         <p style={PARAGRAPH}>
-          This letter further confirms that {data.salutation}{" "}
-          {titleCaseName(data.fullName)} has been relieved from all duties and
-          responsibilities as of the close of business on {numericDate(data.endDate)},
-          after successful completion of all internship requirements. There are no dues
-          or obligations pending against {p.him} as on date.
-        </p>
-
-        <p style={PARAGRAPH}>
-          {p.He} performed assigned tasks satisfactorily and maintained good conduct
-          throughout.
+          {g.s} performed {g.p} assigned responsibilities diligently and maintained good
+          professional conduct throughout {g.p} tenure.
         </p>
 
         <p style={{ ...PARAGRAPH, fontWeight: 700 }}>
-          We wish {p.him} success in future endeavours.
+          We wish {g.o} success in {g.p} future endeavours.
         </p>
 
-        <div style={{ marginTop: 42, fontSize: 15, lineHeight: 1.55 }}>
+        <div style={{ marginTop: 40, fontSize: 15, lineHeight: 1.55 }}>
           <div>Best regards,</div>
           <div>Yours Sincerely,</div>
-          <div>For Techvitta innovations Pvt Ltd.</div>
+          <div style={{ marginTop: 8, fontWeight: 700 }}>For Techvitta Innovations Pvt Ltd.</div>
           <img
             src={signatureUrl}
             alt="Signature"
-            style={{ width: 118, marginTop: 10, marginBottom: 4, display: "block" }}
+            style={{ width: 120, marginTop: 8, marginBottom: 4, display: "block" }}
           />
-          <div>Raja Garapati</div>
+          <div style={{ fontWeight: 700 }}>Raja Garapati</div>
           <div>Head</div>
           <div>People Success Team</div>
         </div>
@@ -215,7 +198,7 @@ export default function CertificateGenerator({
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [candidate, setCandidate] = useState<CertificateCandidate | null>(null);
-  const [form, setForm] = useState<CertificateData>(EMPTY_FORM);
+  const [form, setForm] = useState<CertificateData | null>(null);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [dialogOpen, setDialogOpen] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -236,26 +219,37 @@ export default function CertificateGenerator({
   const openFor = (c: CertificateCandidate) => {
     setCandidate(c);
     setForm({
-      ...EMPTY_FORM,
+      salutation: "Mr.",
       fullName: c.full_name ?? "",
       email: c.email ?? "",
       position: c.jobs?.job_title || "Intern",
+      summary: defaultSummary("Mr."),
+      startDate: "",
+      endDate: "",
       issueDate: format(new Date(), "yyyy-MM-dd"),
+      title: "Certificate Of Experience",
     });
     setStep("form");
     setDialogOpen(true);
   };
 
+  const setField = (key: keyof CertificateData, value: string) =>
+    setForm((f) => (f ? { ...f, [key]: value } : f));
+
+  // Changing salutation refreshes the default summary only if HR hasn't edited it.
+  const onSalutation = (v: string) =>
+    setForm((f) => {
+      if (!f) return f;
+      const sal = v as Salutation;
+      const untouched = f.summary === defaultSummary(f.salutation);
+      return { ...f, salutation: sal, summary: untouched ? defaultSummary(sal) : f.summary };
+    });
+
   const formValid =
-    form.fullName.trim() &&
-    form.email.trim() &&
-    form.position.trim() &&
-    form.projects.trim() &&
-    form.startDate &&
-    form.endDate;
+    form && form.fullName.trim() && form.email.trim() && form.position.trim() && form.startDate && form.endDate && form.summary.trim();
 
   const makePdf = async (): Promise<{ blob: Blob; fileName: string }> => {
-    if (!sheetRef.current) throw new Error("Certificate not rendered yet");
+    if (!sheetRef.current || !form) throw new Error("Certificate not rendered yet");
     const canvas = await html2canvas(sheetRef.current, {
       scale: 2,
       useCORS: true,
@@ -271,7 +265,7 @@ export default function CertificateGenerator({
       pdf.internal.pageSize.getHeight(),
     );
     const cleanName = form.fullName.replace(/[^a-zA-Z0-9]+/g, "");
-    const fileName = `TechVitta_internship_certificate_${cleanName}_${format(
+    const fileName = `TechVitta_Experience_Certificate_${cleanName}_${format(
       new Date(form.issueDate || new Date()),
       "MMMyyyy",
     )}.pdf`;
@@ -298,10 +292,9 @@ export default function CertificateGenerator({
 
   const sendMutation = useMutation({
     mutationFn: async () => {
-      if (!candidate) throw new Error("No candidate selected");
+      if (!candidate || !form) throw new Error("No candidate selected");
       const { blob, fileName } = await makePdf();
 
-      // 1. Upload to the existing experience-letters bucket.
       const storageFileName = `certificate-${candidate.id}-${Date.now()}-${fileName}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("experience-letters")
@@ -316,7 +309,6 @@ export default function CertificateGenerator({
         .getPublicUrl(uploadData.path);
       const certificateUrl = urlData.publicUrl;
 
-      // 2. Base64 for the email attachment (chunked to avoid stack overflow).
       const uint8Array = new Uint8Array(await blob.arrayBuffer());
       const chunkSize = 8192;
       let fileBase64 = "";
@@ -326,8 +318,6 @@ export default function CertificateGenerator({
       }
       fileBase64 = btoa(fileBase64);
 
-      // 3. Email via the existing send-email function (same contract as the
-      //    experience-letter upload flow).
       let emailSent = false;
       const { data: emailData, error: emailError } = await supabase.functions.invoke(
         "send-email",
@@ -354,7 +344,6 @@ export default function CertificateGenerator({
         emailSent = true;
       }
 
-      // 4. Record in the letters history (same table the History tab reads).
       const { error: dbError } = await (supabase.from("experience-letters") as any).insert({
         candidate_id: candidate.id,
         experience_letter_url: certificateUrl,
@@ -367,7 +356,7 @@ export default function CertificateGenerator({
 
       await supabase.from("activity_logs").insert({
         action: "INTERNSHIP_CERTIFICATE_SENT",
-        details: `Internship certificate generated for ${form.fullName} (${form.email}). Email ${emailSent ? "sent" : "failed"}. File: ${fileName}`,
+        details: `Experience certificate generated for ${form.fullName} (${form.email}). Email ${emailSent ? "sent" : "failed"}. File: ${fileName}`,
       });
 
       return { emailSent, certificateUrl };
@@ -376,7 +365,7 @@ export default function CertificateGenerator({
       toast({
         title: result.emailSent ? "Certificate sent" : "Certificate stored",
         description: result.emailSent
-          ? `Certificate emailed to ${form.email} and saved to history.`
+          ? `Certificate emailed to ${form?.email} and saved to history.`
           : "Certificate stored in history, but the email failed to send. You can resend from History.",
       });
       setDialogOpen(false);
@@ -391,9 +380,6 @@ export default function CertificateGenerator({
       });
     },
   });
-
-  const setField = (key: keyof CertificateData, value: string) =>
-    setForm((f) => ({ ...f, [key]: value }));
 
   return (
     <div className="space-y-6">
@@ -445,22 +431,18 @@ export default function CertificateGenerator({
 
       <Dialog open={dialogOpen} onOpenChange={(open) => !sendMutation.isPending && setDialogOpen(open)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {step === "form" ? (
+          {form && step === "form" ? (
             <>
               <DialogHeader>
-                <DialogTitle>Internship certificate — {candidate?.full_name}</DialogTitle>
+                <DialogTitle>Experience certificate — {candidate?.full_name}</DialogTitle>
                 <DialogDescription>
-                  Fill in the internship details. Nothing is sent until you preview and
-                  confirm.
+                  Fill in the details. Nothing is sent until you preview and confirm.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Salutation</Label>
-                  <Select
-                    value={form.salutation}
-                    onValueChange={(v) => setField("salutation", v)}
-                  >
+                  <Select value={form.salutation} onValueChange={onSalutation}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -490,46 +472,7 @@ export default function CertificateGenerator({
                   <Input
                     value={form.position}
                     onChange={(e) => setField("position", e.target.value)}
-                    placeholder="e.g. Blockchain Developer"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Project word</Label>
-                  <Select
-                    value={form.projectType}
-                    onValueChange={(v) => setField("projectType", v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="projects">projects</SelectItem>
-                      <SelectItem value="project">project</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Project name(s)</Label>
-                  <Input
-                    value={form.projects}
-                    onChange={(e) => setField("projects", e.target.value)}
-                    placeholder="e.g. TrustDoc, ChainTrack and Dex"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Internship start date</Label>
-                  <Input
-                    type="date"
-                    value={form.startDate}
-                    onChange={(e) => setField("startDate", e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Internship end date</Label>
-                  <Input
-                    type="date"
-                    value={form.endDate}
-                    onChange={(e) => setField("endDate", e.target.value)}
+                    placeholder="e.g. Software Developer"
                   />
                 </div>
                 <div className="space-y-2">
@@ -541,6 +484,30 @@ export default function CertificateGenerator({
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label>Internship start date</Label>
+                  <Input
+                    type="date"
+                    value={form.startDate}
+                    onChange={(e) => setField("startDate", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Internship end date (relieving)</Label>
+                  <Input
+                    type="date"
+                    value={form.endDate}
+                    onChange={(e) => setField("endDate", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Work summary (auto-fills; edit to fit the intern)</Label>
+                  <Textarea
+                    rows={4}
+                    value={form.summary}
+                    onChange={(e) => setField("summary", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
                   <Label>Certificate title</Label>
                   <Select value={form.title} onValueChange={(v) => setField("title", v)}>
                     <SelectTrigger>
@@ -567,7 +534,7 @@ export default function CertificateGenerator({
                 </Button>
               </DialogFooter>
             </>
-          ) : (
+          ) : form && step === "preview" ? (
             <>
               <DialogHeader>
                 <DialogTitle>Preview — check every detail before sending</DialogTitle>
@@ -577,7 +544,8 @@ export default function CertificateGenerator({
               </DialogHeader>
 
               {/* Scaled-down visible preview */}
-              <div className="mx-auto border border-border shadow-md overflow-hidden"
+              <div
+                className="mx-auto border border-border shadow-md overflow-hidden"
                 style={{ width: 794 * 0.62, height: 1123 * 0.62 }}
               >
                 <div style={{ transform: "scale(0.62)", transformOrigin: "top left" }}>
@@ -601,19 +569,17 @@ export default function CertificateGenerator({
                 <Button onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending}>
                   {sendMutation.isPending ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Sending…
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Sending…
                     </>
                   ) : (
                     <>
-                      <Send className="mr-2 h-4 w-4" />
-                      Generate &amp; send email
+                      <Send className="mr-2 h-4 w-4" /> Generate &amp; send email
                     </>
                   )}
                 </Button>
               </DialogFooter>
             </>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
