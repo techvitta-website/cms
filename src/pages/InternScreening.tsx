@@ -313,6 +313,9 @@ export default function InternScreening() {
             .from("candidates")
             .insert({
               full_name: nameFromFile(file.name),
+              // candidates.email is NOT NULL + UNIQUE; use a unique placeholder
+              // that the screener overwrites once it extracts the real email.
+              email: `noemail+${Date.now()}_${i}@example.com`,
               status: "Pending",
               resume_url: resumeUrl,
               resume_processed: false,

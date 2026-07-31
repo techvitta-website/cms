@@ -67,6 +67,14 @@ function normalizeSkills(skills: string[] | null | undefined): string[] {
   return Array.from(set);
 }
 
+// Placeholder emails (from bulk upload where the real email isn't known yet)
+// should be overwritten once the parser extracts a real one.
+function isPlaceholderEmail(email: string | null | undefined): boolean {
+  const e = String(email ?? "").toLowerCase();
+  if (!e) return true;
+  return e.startsWith("noemail+") || /@(example\.com|pending\.local|intern\.local)$/.test(e);
+}
+
 function cleanList(items: unknown, max = 25): string[] {
   const out: string[] = [];
   if (Array.isArray(items)) {
@@ -421,7 +429,7 @@ async function screenOne(
     screened_at: new Date().toISOString(),
   };
   if (!candidate?.full_name && fields.name) update.full_name = fields.name;
-  if (!candidate?.email && fields.email) update.email = fields.email;
+  if (isPlaceholderEmail(candidate?.email) && fields.email) update.email = fields.email;
   if (!candidate?.phone && fields.phone) update.phone = fields.phone;
 
   const { error: upErr } = await supabase.from("candidates").update(update).eq("id", candidateId);
@@ -598,7 +606,7 @@ async function screenFromStorage(
     screened_at: new Date().toISOString(),
   };
   if (!candidate.full_name && fields.name) update.full_name = fields.name;
-  if (!candidate.email && fields.email) update.email = fields.email;
+  if (isPlaceholderEmail(candidate.email) && fields.email) update.email = fields.email;
   if (!candidate.phone && fields.phone) update.phone = fields.phone;
 
   const { error: upErr } = await supabase.from("candidates").update(update).eq("id", candidate.id);
