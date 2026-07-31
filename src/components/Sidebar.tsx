@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import {
   Home, Briefcase, GraduationCap, Radar, ClipboardList, Calendar,
-  MessageSquare, ShieldCheck, FileCheck, Award, Users, Archive,
+  MessageSquare, ShieldCheck, FileCheck, Award, Users, Archive, FileX2,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -109,6 +109,7 @@ export const menuSections: MenuSection[] = [
       { icon: ShieldCheck, label: "CID Verification", path: "/document-verification" },
       { icon: FileCheck, label: "Offer Letter", path: "/offer-letter" },
       { icon: Award, label: "Experience Letter", path: "/experience-letter" },
+      { icon: FileX2, label: "Rejection Letter", path: "/rejection-letter" },
     ],
   },
   {

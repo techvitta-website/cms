@@ -1390,6 +1390,7 @@ import UploadDocumentsLanding from "./pages/UploadDocumentsLanding";
 import PublicCandidateForm from "./pages/PublicCandidateForm";
 import OfferLetter from "./pages/OfferLetter";
 import ExperienceLetter from "./pages/ExperienceLetter";
+import RejectionLetter from "./pages/RejectionLetter";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
@@ -1516,6 +1517,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Layout>
                     <ExperienceLetter />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/rejection-letter"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <RejectionLetter />
                   </Layout>
                 </ProtectedRoute>
               }
