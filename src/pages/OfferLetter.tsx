@@ -292,7 +292,10 @@ export default function OfferLetter() {
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
   const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
 
-  // Fetch only approved candidates with verified documents
+  // Fetch every candidate approved in feedback (feedback_decision = 'Approve',
+  // or the canonical status 'Approved'). CID/document verification is NOT a gate
+  // here — its status is shown per candidate so HR can decide — so all
+  // feedback-approved interns can be issued an offer letter.
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["approved-candidates"],
     queryFn: async () => {
@@ -316,8 +319,7 @@ export default function OfferLetter() {
             department
           )
         `)
-        .eq("status", "Approved")
-        .eq("document_verification_status", "verified")
+        .or("feedback_decision.eq.Approve,status.eq.Approved")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

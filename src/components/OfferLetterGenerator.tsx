@@ -45,7 +45,23 @@ export interface OfferCandidate {
   full_name: string;
   email: string;
   phone?: string | null;
+  document_verification_status?: string | null;
   jobs?: { job_title: string; department?: string | null } | null;
+}
+
+// CID / document verification status shown per candidate (informational — it does
+// not block offer-letter generation).
+function CidBadge({ status }: { status?: string | null }) {
+  const s = (status || "not_requested").toLowerCase();
+  const map: Record<string, { label: string; cls: string }> = {
+    verified: { label: "CID verified", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
+    submitted: { label: "CID submitted", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+    requested: { label: "CID requested", cls: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
+    not_requested: { label: "CID not requested", cls: "bg-muted text-muted-foreground" },
+    rejected: { label: "CID rejected", cls: "bg-rose-500/15 text-rose-700 dark:text-rose-400" },
+  };
+  const { label, cls } = map[s] ?? map.not_requested;
+  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
 }
 
 type InternshipType = "Unpaid" | "Paid";
@@ -654,7 +670,10 @@ export default function OfferLetterGenerator({
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
             >
               <div className="min-w-0">
-                <p className="font-semibold text-foreground truncate">{c.full_name}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-foreground truncate">{c.full_name}</p>
+                  <CidBadge status={c.document_verification_status} />
+                </div>
                 <p className="text-sm text-muted-foreground truncate">
                   {c.email}
                   {c.jobs?.job_title ? ` · ${c.jobs.job_title}` : ""}
