@@ -69,6 +69,7 @@ type InternCandidate = {
   screening_rationale: string | null;
   intern_flags: string[] | null;
   resume_processed: boolean | null;
+  screened_at: string | null;
 };
 
 const tierBadgeClass = (tier: string | null, score: number | null) => {
@@ -137,7 +138,7 @@ export default function InternScreening() {
     },
   });
 
-  // All screened / batch-tagged candidates for the review queue.
+  // The ENTIRE candidate database for the review queue (not just batches).
   const {
     data: candidates = [],
     isLoading,
@@ -148,15 +149,24 @@ export default function InternScreening() {
       const { data, error } = await supabase
         .from("candidates")
         .select(
-          "id, full_name, email, phone, status, resume_url, skills, college, degree, branch, graduation_year, cgpa, batch_tag, source_portal, screening_score, screening_tier, screening_rationale, intern_flags, resume_processed",
+          "id, full_name, email, phone, status, resume_url, skills, college, degree, branch, graduation_year, cgpa, batch_tag, source_portal, screening_score, screening_tier, screening_rationale, intern_flags, resume_processed, screened_at",
         )
-        .not("batch_tag", "is", null)
         .order("screening_score", { ascending: false, nullsFirst: false })
-        .limit(1000);
+        .limit(2000);
       if (error) throw error;
       return (data ?? []) as InternCandidate[];
     },
   });
+
+  // Database-wide screening stats.
+  const unscoredCount = useMemo(
+    () => candidates.filter((c) => c.resume_url && !c.screened_at).length,
+    [candidates],
+  );
+  const failedCount = useMemo(
+    () => candidates.filter((c) => (c.intern_flags ?? []).includes("screen_failed")).length,
+    [candidates],
+  );
 
   const batchOptions = useMemo(() => {
     const set = new Set<string>();
@@ -183,7 +193,13 @@ export default function InternScreening() {
     const q = query.trim().toLowerCase();
     const min = minScore.trim() === "" ? null : Number(minScore);
     return candidates.filter((c) => {
-      if (batchFilter !== "__ALL__" && c.batch_tag !== batchFilter) return false;
+      if (batchFilter !== "__ALL__") {
+        if (batchFilter === "__NOBATCH__") {
+          if (c.batch_tag) return false;
+        } else if (c.batch_tag !== batchFilter) {
+          return false;
+        }
+      }
       if (tierFilter !== "__ALL__" && (c.screening_tier || "Unscored") !== tierFilter) return false;
       if (statusFilter !== "__ALL__" && (c.status || "Pending") !== statusFilter) return false;
       if (min != null && !Number.isNaN(min) && (c.screening_score ?? -1) < min) return false;
@@ -404,6 +420,77 @@ export default function InternScreening() {
     }
   };
 
+  // Screen the ENTIRE database server-side: the edge function downloads each
+  // stored resume, Gemini reads it, and scores land on the candidate row.
+  // Small batches per call; we loop until nothing is left.
+  const runStorageScreening = async (candidateIds?: string[]) => {
+    setUploading(true);
+    let done = 0;
+    let stalled = 0;
+    try {
+      const idsQueue = candidateIds ? [...candidateIds] : null;
+      for (let round = 0; round < 60; round++) {
+        const body: Record<string, unknown> = {
+          fromStorage: true,
+          limit: 5,
+          targetSkills: effectiveTargetSkills,
+        };
+        if (idsQueue) {
+          if (idsQueue.length === 0) break;
+          body.candidateIds = idsQueue.splice(0, 5);
+        } else {
+          body.onlyUnscored = true;
+        }
+        setProgress(`Screening database with AI… ${done} done`);
+        const { data, error } = await supabase.functions.invoke("intern-screen", { body });
+        if (error) throw error;
+        const screened = Number((data as any)?.screened ?? 0);
+        const processed = Number((data as any)?.processed ?? 0);
+        const remaining = Number((data as any)?.remaining ?? 0);
+        done += screened;
+        if (!idsQueue) {
+          if (remaining === 0) break;
+          if (processed === 0) break;
+          // If a whole round produced no successes (e.g. AI quota exhausted),
+          // stop rather than burning through every candidate as "failed".
+          if (screened === 0) {
+            stalled++;
+            if (stalled >= 2) {
+              toast({
+                title: "AI limit reached",
+                description: `${done} screened. The AI quota seems exhausted — use "Retry failed" later to finish the rest.`,
+                variant: "destructive",
+              });
+              break;
+            }
+          } else {
+            stalled = 0;
+          }
+        }
+      }
+      if (done > 0) {
+        toast({ title: "Database screening finished", description: `${done} candidate(s) scored and ranked.` });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["intern-candidates"] });
+      await refetch();
+    } catch (err: any) {
+      toast({ title: "Screening failed", description: err?.message || String(err), variant: "destructive" });
+    } finally {
+      setUploading(false);
+      setProgress(null);
+    }
+  };
+
+  const handleScreenDatabase = () => runStorageScreening();
+
+  const handleRetryFailed = () => {
+    const ids = candidates
+      .filter((c) => (c.intern_flags ?? []).includes("screen_failed") && c.resume_url)
+      .map((c) => c.id);
+    if (ids.length === 0) return;
+    return runStorageScreening(ids);
+  };
+
   const handleStatusChange = async (candidate: InternCandidate, newStatus: string) => {
     setUpdatingId(candidate.id);
     try {
@@ -569,14 +656,31 @@ export default function InternScreening() {
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-xl">Ranked review queue</CardTitle>
+              <CardTitle className="text-xl">Ranked review queue — entire database</CardTitle>
               <p className="text-sm text-muted-foreground">
-                {filtered.length} of {candidates.length} candidate(s). Highest AI score first. Nobody is auto-rejected.
+                {filtered.length} of {candidates.length} candidate(s) in the database. Highest AI score first. Nobody is auto-rejected.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={handleRescore} disabled={uploading || filtered.length === 0}>
-              <RefreshCw className="h-4 w-4 mr-2" /> Re-score shown
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {unscoredCount > 0 && (
+                <Button
+                  size="sm"
+                  onClick={handleScreenDatabase}
+                  disabled={uploading}
+                  className="bg-gradient-primary hover:opacity-90 text-primary-foreground"
+                >
+                  <Sparkles className="h-4 w-4 mr-2" /> Screen database ({unscoredCount})
+                </Button>
+              )}
+              {failedCount > 0 && (
+                <Button variant="outline" size="sm" onClick={handleRetryFailed} disabled={uploading}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Retry failed ({failedCount})
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleRescore} disabled={uploading || filtered.length === 0}>
+                <RefreshCw className="h-4 w-4 mr-2" /> Re-score shown
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -597,6 +701,7 @@ export default function InternScreening() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__ALL__">All batches</SelectItem>
+                <SelectItem value="__NOBATCH__">No batch (older records)</SelectItem>
                 {batchOptions.map((b) => (
                   <SelectItem key={b} value={b}>
                     {b}
