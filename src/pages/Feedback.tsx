@@ -626,7 +626,7 @@ export default function Feedback() {
           <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg">
             <p>{searchTerm ? "No candidates found matching your search." : "No candidates with scheduled interviews found. Schedule interviews first to submit feedback."}</p>
           </div>
-        ) : (          <div className="grid gap-6">
+        ) : (          <div className="grid gap-6 lg:grid-cols-2">
             {filteredCandidates.map((candidate) => (
               <CandidateCard
                 key={candidate.id}
@@ -789,7 +789,7 @@ export default function Feedback() {
             <p>{historySearchTerm ? "No feedback found matching your search." : "No feedback submitted yet. Submit feedback to see history here."}</p>
           </div>
         ) : (
-          <div className="grid gap-6">
+          <div className="grid gap-6 lg:grid-cols-2">
             {filteredFeedbackHistory.map((candidate) => (
               <div
                 key={candidate.id}

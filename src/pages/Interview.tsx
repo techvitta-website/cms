@@ -520,7 +520,7 @@ export default function Interview() {
         </div>
       </div>
 
-      <div className="grid gap-6">
+      <div className="grid gap-6 lg:grid-cols-2">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p>{searchTerm ? "No candidates found matching your search." : "No shortlisted candidates found. Shortlist candidates first to schedule interviews."}</p>
