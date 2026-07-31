@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Mail, Search, Eye, CheckCircle, XCircle, Clock, FileText, Download, File, Copy } from "lucide-react";
 import { openResume } from "@/lib/resume";
+import { useAuth } from "@/context/AuthContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +69,7 @@ interface CandidateDocument {
 
 export default function DocumentVerification() {
   const { toast } = useToast();
+  const { hrUser } = useAuth();
   const queryClient = useQueryClient();
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [isSendEmailDialogOpen, setIsSendEmailDialogOpen] = useState(false);
@@ -438,8 +440,10 @@ export default function DocumentVerification() {
     
     setVerifyingDocId('all');
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const verifiedBy = user?.id || null;
+      // verified_by must reference hr_users.id (FK constraint) — NOT the auth
+      // uid. For some HR accounts those ids differ, which made every
+      // verify/reject fail with a foreign-key violation.
+      const verifiedBy = hrUser?.id ?? null;
 
       // Get all pending documents
       const pendingDocs = candidateDocuments.filter(doc => doc.verification_status === 'pending');
@@ -521,8 +525,10 @@ export default function DocumentVerification() {
     
     setVerifyingDocId('reject-all');
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const verifiedBy = user?.id || null;
+      // verified_by must reference hr_users.id (FK constraint) — NOT the auth
+      // uid. For some HR accounts those ids differ, which made every
+      // verify/reject fail with a foreign-key violation.
+      const verifiedBy = hrUser?.id ?? null;
 
       // Get all pending documents
       const pendingDocs = candidateDocuments.filter(doc => doc.verification_status === 'pending');
@@ -584,8 +590,10 @@ export default function DocumentVerification() {
     
     setVerifyingDocId(docId);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const verifiedBy = user?.id || null;
+      // verified_by must reference hr_users.id (FK constraint) — NOT the auth
+      // uid. For some HR accounts those ids differ, which made every
+      // verify/reject fail with a foreign-key violation.
+      const verifiedBy = hrUser?.id ?? null;
 
       // Update document to verified
       const { error } = await supabase
@@ -669,8 +677,10 @@ export default function DocumentVerification() {
     setIsRejectDialogOpen(false);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const verifiedBy = user?.id || null;
+      // verified_by must reference hr_users.id (FK constraint) — NOT the auth
+      // uid. For some HR accounts those ids differ, which made every
+      // verify/reject fail with a foreign-key violation.
+      const verifiedBy = hrUser?.id ?? null;
 
       // Get upload link (from uploadLinks state or generate it)
       const uploadLink = uploadLinks[selectedCandidate.id] || `${window.location.origin}/${selectedCandidate.id}/upload-documents`;
@@ -772,9 +782,9 @@ export default function DocumentVerification() {
       const deadline = new Date();
       deadline.setDate(deadline.getDate() + 7); // 7 days deadline
 
-      // Get current user ID for requested_by
-      const { data: { user } } = await supabase.auth.getUser();
-      const requestedBy = user?.id || null;
+      // requested_by must reference hr_users.id (FK constraint) — NOT the auth
+      // uid, which differs for some HR accounts.
+      const requestedBy = hrUser?.id ?? null;
 
       // Update candidate status
       const { error: updateError } = await supabase
