@@ -149,6 +149,7 @@ export default function Interview() {
   const [quickCandidate, setQuickCandidate] = useState<Candidate | null>(null);
   const [quickForm, setQuickForm] = useState<QuickForm | null>(null);
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
+  const [stageView, setStageView] = useState<"awaiting" | "scheduled" | "all">("awaiting");
 
   // Fetch only candidates whose interview is scheduled (clean stage split — a
   // shortlisted candidate lives on the Shortlist page until they are advanced
@@ -743,6 +744,24 @@ export default function Interview() {
     },
   });
 
+  // Split the interview stage into the two groups the user wants to tell apart:
+  // "awaiting" = advanced but not booked (Interview Pending), and "scheduled" =
+  // an interview slot is actually booked (Interview Scheduled).
+  const awaitingList = useMemo(
+    () => filteredCandidates.filter((c) => c.status !== "Interview Scheduled"),
+    [filteredCandidates],
+  );
+  const scheduledList = useMemo(
+    () => filteredCandidates.filter((c) => c.status === "Interview Scheduled"),
+    [filteredCandidates],
+  );
+  const visibleCandidates =
+    stageView === "awaiting"
+      ? awaitingList
+      : stageView === "scheduled"
+        ? scheduledList
+        : filteredCandidates;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -796,13 +815,46 @@ export default function Interview() {
         />
       </div>
 
+      {/* Differentiate the two groups: awaiting scheduling vs already scheduled */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={stageView === "awaiting" ? "default" : "outline"}
+          onClick={() => setStageView("awaiting")}
+        >
+          Awaiting Schedule ({awaitingList.length})
+        </Button>
+        <Button
+          size="sm"
+          variant={stageView === "scheduled" ? "default" : "outline"}
+          onClick={() => setStageView("scheduled")}
+        >
+          Scheduled ({scheduledList.length})
+        </Button>
+        <Button
+          size="sm"
+          variant={stageView === "all" ? "default" : "outline"}
+          onClick={() => setStageView("all")}
+        >
+          All ({filteredCandidates.length})
+        </Button>
+      </div>
+
       <div className="grid gap-3 sm:gap-4">
-        {filteredCandidates.length === 0 ? (
+        {visibleCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm || jobFilter !== "all" ? "No candidates found matching your filters." : "No candidates in the interview stage yet. Advance shortlisted candidates from the Shortlist page, then book each one's slot here."}</p>
+            <p>
+              {searchTerm || jobFilter !== "all"
+                ? "No candidates found matching your filters."
+                : stageView === "scheduled"
+                  ? "No interviews booked yet. Book a slot for candidates under “Awaiting Schedule.”"
+                  : stageView === "awaiting"
+                    ? "No candidates awaiting scheduling. Advance shortlisted candidates from the Shortlist page."
+                    : "No candidates in the interview stage yet. Advance shortlisted candidates from the Shortlist page, then book each one's slot here."}
+            </p>
           </div>
         ) : (
-          filteredCandidates.map((candidate) => (
+          visibleCandidates.map((candidate) => (
             <CandidateCard
               variant="row"
               key={candidate.id}
