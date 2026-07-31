@@ -31,14 +31,6 @@ export default {
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",
         },
-        warning: {
-          DEFAULT: "hsl(var(--warning))",
-          foreground: "hsl(var(--warning-foreground))",
-        },
-        info: {
-          DEFAULT: "hsl(var(--info))",
-          foreground: "hsl(var(--info-foreground))",
-        },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
@@ -87,11 +79,6 @@ export default {
       backgroundImage: {
         'gradient-primary': 'var(--gradient-primary)',
         'gradient-subtle': 'var(--gradient-subtle)',
-        'gradient-brand': 'var(--gradient-brand)',
-        'gradient-violet': 'var(--gradient-violet)',
-        'gradient-amber': 'var(--gradient-amber)',
-        'gradient-emerald': 'var(--gradient-emerald)',
-        'gradient-rose': 'var(--gradient-rose)',
       },
       keyframes: {
         "accordion-down": {
