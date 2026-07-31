@@ -549,7 +549,7 @@ export default function ExperienceLetter() {
         await supabase
           .from("resume_upload_hashes")
           .insert({ file_hash: resumeHash, original_name: file.name })
-          .catch(() => {}); // Ignore errors if hash already exists
+          .then(() => {}, () => {}); // Ignore errors if hash already exists
       }
 
       // Create candidate record

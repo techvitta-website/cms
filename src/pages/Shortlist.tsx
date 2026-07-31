@@ -248,7 +248,7 @@ export default function Shortlist() {
       candidateEmail: candidate.email,
       candidateName: candidate.full_name,
       positionTitle: candidate.jobs?.job_title || null,
-      comment,
+      comment: candidate.shortlist_comment ?? "",
     });
   };
 

@@ -1392,6 +1392,7 @@ import OfferLetter from "./pages/OfferLetter";
 import ExperienceLetter from "./pages/ExperienceLetter";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
@@ -1406,6 +1407,7 @@ const App = () => (
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             {/* Public pages - no authentication required */}
             <Route path="/apply" element={<PublicCandidateForm />} />
             <Route path="/candidate-form" element={<PublicCandidateForm />} />
