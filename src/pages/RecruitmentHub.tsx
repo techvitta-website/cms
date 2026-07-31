@@ -1415,6 +1415,7 @@ export default function RecruitmentHub() {
                               <SelectItem value="Pending">Pending</SelectItem>
                               <SelectItem value="Shortlisted">Shortlisted</SelectItem>
                               <SelectItem value="Rejected">Rejected</SelectItem>
+                              <SelectItem value="Interview Pending">Interview Pending</SelectItem>
                               <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
                               <SelectItem value="Approved">Approved</SelectItem>
                             </SelectContent>

@@ -43,6 +43,7 @@ const RESUME_BUCKETS = ["resumes-private", "resumes"];
 const STATUS_OPTIONS = [
   "Pending",
   "Shortlisted",
+  "Interview Pending",
   "Interview Scheduled",
   "Approved",
   "Offer Released",

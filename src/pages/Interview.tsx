@@ -171,7 +171,7 @@ export default function Interview() {
             job_title
           )
         `)
-        .eq("status", "Interview Scheduled")
+        .in("status", ["Interview Pending", "Interview Scheduled"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -799,7 +799,7 @@ export default function Interview() {
       <div className="grid gap-3 sm:gap-4">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm || jobFilter !== "all" ? "No candidates found matching your filters." : "No candidates with a scheduled interview yet. Advance shortlisted candidates from the Shortlist page to schedule interviews."}</p>
+            <p>{searchTerm || jobFilter !== "all" ? "No candidates found matching your filters." : "No candidates in the interview stage yet. Advance shortlisted candidates from the Shortlist page, then book each one's slot here."}</p>
           </div>
         ) : (
           filteredCandidates.map((candidate) => (
@@ -831,16 +831,16 @@ export default function Interview() {
                   );
                 })()}
                 <Select
-                  value={candidate.status || "Interview Scheduled"}
+                  value={candidate.status || "Interview Pending"}
                   onValueChange={(value) => handleStageChange(candidate, value)}
                   disabled={updatingStageId === candidate.id}
                 >
-                  <SelectTrigger className="h-9 w-[170px]">
+                  <SelectTrigger className="h-9 w-[190px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
                     <SelectItem value="Shortlisted">Shortlisted (send back)</SelectItem>
+                    <SelectItem value="Interview Pending">Interview Pending</SelectItem>
                     <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
                   </SelectContent>
                 </Select>

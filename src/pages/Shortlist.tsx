@@ -221,11 +221,12 @@ export default function Shortlist() {
       queryClient.invalidateQueries({ queryKey: ["shortlisted-candidates"] });
       queryClient.invalidateQueries({ queryKey: ["feedback-history"] });
       
-      // If status changed to Shortlisted, redirect to Interview page after 1 second
-      if (variables.newStatus === "Shortlisted") {
+      // When advanced to the interview stage, jump to the Interview page so HR
+      // can book the actual slot (candidate is "Interview Pending" until booked).
+      if (variables.newStatus === "Interview Pending") {
         toast({
-          title: "Status Updated",
-          description: "Candidate has been shortlisted. Redirecting to Interview page...",
+          title: "Moved to Interview",
+          description: "Candidate is now in the interview stage (awaiting a booked slot). Redirecting to the Interview page...",
         });
         setTimeout(() => {
           navigate("/interview");
@@ -615,7 +616,7 @@ export default function Shortlist() {
                 <SelectContent>
                   <SelectItem value="Pending">Pending</SelectItem>
                   <SelectItem value="Shortlisted">Shortlisted</SelectItem>
-                  <SelectItem value="Interview Scheduled">Interview Scheduled</SelectItem>
+                  <SelectItem value="Interview Pending">Move to Interview</SelectItem>
                 </SelectContent>
               </Select>
               {updatingStatus === candidate.id && (
