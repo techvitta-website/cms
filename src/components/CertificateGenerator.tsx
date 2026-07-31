@@ -74,9 +74,81 @@ const titleCaseName = (name: string) =>
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
 
-function defaultSummary(sal: Salutation): string {
+// Role-aware work-summary body. Picks the activity description + closing line
+// from keywords in the position, then fills in the correct pronouns.
+function roleProfile(position: string): { activities: string; strength: string; field: string } {
+  const r = (position || "").toLowerCase();
+  const has = (...k: string[]) => k.some((x) => r.includes(x));
+
+  if (has("ui", "ux", "design", "figma"))
+    return {
+      activities:
+        "UI/UX design and product experience activities including user research, wireframing, prototyping in Figma, design-system creation, and delivering responsive interface designs",
+      strength: "strong design thinking",
+      field: "product design",
+    };
+  if (has("blockchain", "web3", "solidity", "smart contract"))
+    return {
+      activities:
+        "blockchain development activities including smart contract design, testing and deployment, working with tokens and distributed ledger technologies, and technical documentation",
+      strength: "strong analytical skills",
+      field: "blockchain development",
+    };
+  if (has("data", "analyst", "analytics", "machine learning", " ml", "ai ", "data science"))
+    return {
+      activities:
+        "data and analytics activities including data collection and cleaning, exploratory analysis, building dashboards and reports, and deriving actionable insights",
+      strength: "strong analytical skills",
+      field: "data analysis",
+    };
+  if (has("flutter", "mobile", "android", "ios", "react native"))
+    return {
+      activities:
+        "mobile application development activities including building cross-platform features, UI implementation, API integration, testing, and release support",
+      strength: "strong technical skills",
+      field: "mobile development",
+    };
+  if (has("qa", "test", "quality"))
+    return {
+      activities:
+        "quality assurance activities including test-case design, manual and automated testing, defect tracking, and release verification",
+      strength: "strong attention to detail",
+      field: "software testing",
+    };
+  if (has("hr", "human resource", "recruit", "talent", "people"))
+    return {
+      activities:
+        "human resources activities including candidate sourcing and screening, interview coordination, onboarding support, and HR documentation",
+      strength: "strong interpersonal skills",
+      field: "recruitment",
+    };
+  if (has("market", "content", "seo", "social", "brand"))
+    return {
+      activities:
+        "marketing activities including content creation, social-media management, campaign support, and performance tracking",
+      strength: "strong creative skills",
+      field: "digital marketing",
+    };
+  if (has("frontend", "front-end", "react", "web develop"))
+    return {
+      activities:
+        "frontend web development activities including building responsive interfaces, component development, API integration, and testing",
+      strength: "strong technical skills",
+      field: "web development",
+    };
+  // Default — general software development.
+  return {
+    activities:
+      "software development activities including backend development, API integrations, database management, debugging, testing, and deployment support",
+    strength: "strong analytical skills",
+    field: "software development",
+  };
+}
+
+function defaultSummary(sal: Salutation, position: string): string {
   const g = PRO[sal];
-  return `During ${g.p} internship, ${g.s.toLowerCase()} was actively involved in software development activities including backend development, API integrations, database management, debugging, testing, and deployment support. ${g.s} demonstrated strong analytical skills and a solid understanding of modern software development practices.`;
+  const { activities, strength, field } = roleProfile(position);
+  return `During ${g.p} internship, ${g.s.toLowerCase()} was actively involved in ${activities}. ${g.s} demonstrated ${strength} and a solid understanding of modern ${field} practices.`;
 }
 
 const PARAGRAPH: CSSProperties = {
@@ -201,6 +273,8 @@ export default function CertificateGenerator({
   const [form, setForm] = useState<CertificateData | null>(null);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Once HR edits the summary, stop auto-regenerating it from role/salutation.
+  const [summaryEdited, setSummaryEdited] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
@@ -218,12 +292,14 @@ export default function CertificateGenerator({
 
   const openFor = (c: CertificateCandidate) => {
     setCandidate(c);
+    const position = c.jobs?.job_title || "Intern";
+    setSummaryEdited(false);
     setForm({
       salutation: "Mr.",
       fullName: c.full_name ?? "",
       email: c.email ?? "",
-      position: c.jobs?.job_title || "Intern",
-      summary: defaultSummary("Mr."),
+      position,
+      summary: defaultSummary("Mr.", position),
       startDate: "",
       endDate: "",
       issueDate: format(new Date(), "yyyy-MM-dd"),
@@ -236,13 +312,19 @@ export default function CertificateGenerator({
   const setField = (key: keyof CertificateData, value: string) =>
     setForm((f) => (f ? { ...f, [key]: value } : f));
 
-  // Changing salutation refreshes the default summary only if HR hasn't edited it.
+  // Salutation: keep pronouns correct; regenerate summary unless HR edited it.
   const onSalutation = (v: string) =>
     setForm((f) => {
       if (!f) return f;
       const sal = v as Salutation;
-      const untouched = f.summary === defaultSummary(f.salutation);
-      return { ...f, salutation: sal, summary: untouched ? defaultSummary(sal) : f.summary };
+      return { ...f, salutation: sal, summary: summaryEdited ? f.summary : defaultSummary(sal, f.position) };
+    });
+
+  // Role: regenerate the role-specific summary unless HR edited it.
+  const onPosition = (v: string) =>
+    setForm((f) => {
+      if (!f) return f;
+      return { ...f, position: v, summary: summaryEdited ? f.summary : defaultSummary(f.salutation, v) };
     });
 
   const formValid =
@@ -471,7 +553,7 @@ export default function CertificateGenerator({
                   <Label>Position / role</Label>
                   <Input
                     value={form.position}
-                    onChange={(e) => setField("position", e.target.value)}
+                    onChange={(e) => onPosition(e.target.value)}
                     placeholder="e.g. Software Developer"
                   />
                 </div>
@@ -500,11 +582,14 @@ export default function CertificateGenerator({
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label>Work summary (auto-fills; edit to fit the intern)</Label>
+                  <Label>Work summary (auto-fills from the role; edit to fit the intern)</Label>
                   <Textarea
                     rows={4}
                     value={form.summary}
-                    onChange={(e) => setField("summary", e.target.value)}
+                    onChange={(e) => {
+                      setSummaryEdited(true);
+                      setField("summary", e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
