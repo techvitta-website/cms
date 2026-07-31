@@ -28,7 +28,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { CalendarIcon, Clock, Loader2, Mail, Search, History, ExternalLink, Video } from "lucide-react";
-import { format } from "date-fns";
+import { format, addDays, addMinutes, isWeekend, setHours, setMinutes, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { openResume } from "@/lib/resume";
 import CandidateFilterBar, {
@@ -77,6 +77,49 @@ interface InterviewFormData {
   panelRoomDetails: string;
 }
 
+// --- Quick (auto) interview scheduling -------------------------------------
+// One-click scheduling: pick the next open weekday slot, pre-fill a default
+// panel and the company meeting link (remembered per browser), then book the
+// interview and email the invite in a single confirm.
+const QUICK_LINK_KEY = "cms_quick_interview_link";
+const QUICK_PANEL_KEY = "cms_quick_interview_panel";
+const FALLBACK_PANEL = "TechVitta Interview Panel";
+const BUSINESS_END_HOUR = 17; // slots run up to (not including) 17:00
+const DEFAULT_START_HOUR = 11; // preferred first slot each day
+const SLOT_MINUTES = 30;
+
+function nextBusinessDay(from: Date): Date {
+  let d = addDays(startOfDay(from), 1);
+  while (isWeekend(d)) d = addDays(d, 1);
+  return d;
+}
+
+function slotKey(d: Date): string {
+  return format(d, "yyyy-MM-dd'T'HH:mm");
+}
+
+// Next open weekday 30-min slot (11:00–16:30) that isn't already booked.
+function computeQuickSlot(taken: Set<string>, now: Date): Date {
+  let slot = setMinutes(setHours(nextBusinessDay(now), DEFAULT_START_HOUR), 0);
+  for (let i = 0; i < 600; i++) {
+    if (!isWeekend(slot) && slot.getHours() < BUSINESS_END_HOUR && !taken.has(slotKey(slot))) {
+      return slot;
+    }
+    slot = addMinutes(slot, SLOT_MINUTES);
+    if (slot.getHours() >= BUSINESS_END_HOUR || isWeekend(slot)) {
+      slot = setMinutes(setHours(nextBusinessDay(slot), DEFAULT_START_HOUR), 0);
+    }
+  }
+  return slot;
+}
+
+interface QuickForm {
+  date: Date;
+  time: string;
+  panel: string;
+  link: string;
+}
+
 export default function Interview() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -102,6 +145,9 @@ export default function Interview() {
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [jobFilter, setJobFilter] = useState("all");
   const [sort, setSort] = useState<CandidateSort>("date-desc");
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickCandidate, setQuickCandidate] = useState<Candidate | null>(null);
+  const [quickForm, setQuickForm] = useState<QuickForm | null>(null);
 
   // Fetch only candidates whose interview is scheduled (clean stage split — a
   // shortlisted candidate lives on the Shortlist page until they are advanced
@@ -483,6 +529,153 @@ export default function Interview() {
     [candidates, searchTerm, jobFilter, sort],
   );
 
+  // Slots already booked (future interviews) so quick-schedule doesn't collide.
+  const takenSlots = useMemo(() => {
+    const s = new Set<string>();
+    (interviewHistory as any[]).forEach((iv) => {
+      if (iv.interview_date) s.add(slotKey(new Date(iv.interview_date)));
+    });
+    return s;
+  }, [interviewHistory]);
+
+  // Open the one-click quick-schedule dialog with an auto-picked slot and the
+  // remembered default panel + company meeting link.
+  const handleOpenQuick = (candidate: Candidate) => {
+    const slot = computeQuickSlot(takenSlots, new Date());
+    let savedLink = "";
+    let savedPanel = FALLBACK_PANEL;
+    try {
+      savedLink = localStorage.getItem(QUICK_LINK_KEY) || "";
+      savedPanel = localStorage.getItem(QUICK_PANEL_KEY) || FALLBACK_PANEL;
+    } catch {
+      // localStorage unavailable — fall back to defaults.
+    }
+    setQuickCandidate(candidate);
+    setQuickForm({
+      date: slot,
+      time: format(slot, "HH:mm"),
+      panel: savedPanel,
+      link: savedLink,
+    });
+    setQuickOpen(true);
+  };
+
+  // Book the interview AND email the invite in one step.
+  const quickScheduleMutation = useMutation({
+    mutationFn: async ({
+      candidate,
+      date,
+      time,
+      panel,
+      link,
+    }: {
+      candidate: Candidate;
+      date: Date;
+      time: string;
+      panel: string;
+      link: string;
+    }) => {
+      const interviewDateTime = new Date(date);
+      const [hours, minutes] = time.split(":").map(Number);
+      interviewDateTime.setHours(hours, minutes, 0, 0);
+
+      // Don't double-send if this candidate was already invited.
+      const { data: existingLogs } = await supabase
+        .from("activity_logs")
+        .select("id")
+        .eq("action", "INTERVIEW_EMAIL_SENT")
+        .ilike("details", `%${candidate.email}%`)
+        .limit(1);
+      if (existingLogs && existingLogs.length > 0) {
+        throw new Error("Interview email has already been sent to this candidate.");
+      }
+
+      const notes = link ? `Meeting Link: ${link}` : null;
+
+      const { error: insertError } = await supabase.from("interviews").insert({
+        candidate_id: candidate.id,
+        candidate_name: candidate.full_name,
+        interview_mode: "Online",
+        interview_date: interviewDateTime.toISOString(),
+        interview_panel: panel,
+        notes,
+      });
+      if (insertError) throw insertError;
+
+      await supabase
+        .from("candidates")
+        .update({ status: "Interview Scheduled" })
+        .eq("id", candidate.id);
+      await supabase
+        .from("shortlist_records")
+        .update({ status: "Interview Scheduled" })
+        .eq("candidate_id", candidate.id);
+
+      await supabase.from("activity_logs").insert({
+        action: "INTERVIEW_SCHEDULED",
+        details: `Interview auto-scheduled (Quick): Online with panel ${panel} on ${format(
+          interviewDateTime,
+          "PPP 'at' p",
+        )}.`,
+      });
+
+      const { data, error } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: candidate.email,
+          candidateName: candidate.full_name,
+          emailType: "interview",
+          data: {
+            companyName: "Techvitta Innovations Pvt Ltd",
+            positionTitle: candidate.jobs?.job_title || "Interview Opportunity",
+            interviewDate: format(interviewDateTime, "yyyy-MM-dd"),
+            interviewTime: format(interviewDateTime, "HH:mm"),
+            interviewMode: "Online",
+            interviewPanel: panel || "",
+            interviewPanelLink: link || "",
+            interviewNotes: "",
+            locationDetails: "",
+            reportingInstructions: "",
+            documentsToBring: "",
+            panelRoomDetails: "",
+          },
+        },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed to send email");
+
+      await supabase.from("activity_logs").insert({
+        action: "INTERVIEW_EMAIL_SENT",
+        details: `Interview email sent to ${candidate.full_name} (${candidate.email})`,
+      });
+
+      // Remember the panel + link as the defaults for next time.
+      try {
+        localStorage.setItem(QUICK_LINK_KEY, link || "");
+        localStorage.setItem(QUICK_PANEL_KEY, panel || "");
+      } catch {
+        // ignore
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shortlisted-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["interview-history"] });
+      toast({
+        title: "Interview scheduled",
+        description: "Slot booked and the invite was emailed to the candidate.",
+      });
+      setQuickOpen(false);
+      setQuickCandidate(null);
+    },
+    onError: (error: any) => {
+      const already = error?.message?.includes("already been sent");
+      toast({
+        title: already ? "Already scheduled" : "Error",
+        description: error.message || "Failed to schedule the interview",
+        variant: already ? "default" : "destructive",
+      });
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -558,9 +751,17 @@ export default function Interview() {
               }
             >
               <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="default"
+                  className="bg-gradient-primary hover:opacity-90"
+                  onClick={() => handleOpenQuick(candidate)}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  Quick Schedule
+                </Button>
                 <Dialog open={isDialogOpen && selectedCandidate?.id === candidate.id} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button onClick={() => handleOpenDialog(candidate)}>
+                    <Button variant="outline" onClick={() => handleOpenDialog(candidate)}>
                       Schedule Interview
                     </Button>
                   </DialogTrigger>
@@ -816,6 +1017,110 @@ export default function Interview() {
           ))
         )}
       </div>
+
+      {/* Quick Schedule confirm dialog — auto-picked slot + default link */}
+      <Dialog open={quickOpen} onOpenChange={(o) => !quickScheduleMutation.isPending && setQuickOpen(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Quick schedule — {quickCandidate?.full_name}</DialogTitle>
+          </DialogHeader>
+          {quickForm && (
+            <div className="space-y-4 mt-2">
+              <p className="text-sm text-muted-foreground">
+                Auto-picked the next open weekday slot. Adjust if needed, then confirm — the invite is
+                emailed to {quickCandidate?.email}.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !quickForm.date && "text-muted-foreground",
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {quickForm.date ? format(quickForm.date, "PPP") : "Pick a date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={quickForm.date}
+                        onSelect={(d) => d && setQuickForm((f) => (f ? { ...f, date: d } : f))}
+                        disabled={(date) => date < startOfDay(new Date())}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Time</Label>
+                  <Input
+                    type="time"
+                    value={quickForm.time}
+                    onChange={(e) => setQuickForm((f) => (f ? { ...f, time: e.target.value } : f))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Interview panel</Label>
+                <Input
+                  value={quickForm.panel}
+                  onChange={(e) => setQuickForm((f) => (f ? { ...f, panel: e.target.value } : f))}
+                  placeholder="Panel member names"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Meeting link (default company link — remembered)</Label>
+                <Input
+                  value={quickForm.link}
+                  onChange={(e) => setQuickForm((f) => (f ? { ...f, link: e.target.value } : f))}
+                  placeholder="https://meet.google.com/your-room"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setQuickOpen(false)}
+                  disabled={quickScheduleMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() =>
+                    quickCandidate &&
+                    quickForm &&
+                    quickScheduleMutation.mutate({
+                      candidate: quickCandidate,
+                      date: quickForm.date,
+                      time: quickForm.time,
+                      panel: quickForm.panel,
+                      link: quickForm.link,
+                    })
+                  }
+                  disabled={quickScheduleMutation.isPending || !quickForm.time}
+                >
+                  {quickScheduleMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Scheduling…
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="mr-2 h-4 w-4" />
+                      Confirm &amp; send
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
         </TabsContent>
 
         <TabsContent value="history" className="mt-6">
