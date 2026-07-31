@@ -38,6 +38,9 @@ interface Candidate {
   resume_url: string | null;
   status: string;
   job_id: string | null;
+  feedback_rating?: number | null;
+  feedback_decision?: "Approve" | "Reject" | null;
+  document_verification_status?: string | null;
   jobs?: {
     job_title: string;
     department: string | null;
@@ -86,7 +89,9 @@ export default function ExperienceLetter() {
   const [activeTab, setActiveTab] = useState("generate");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
 
-  // Fetch all candidates (since experience letters can be sent to any candidate)
+  // Experience letters/certificates follow working feedback: only candidates
+  // approved in feedback (feedback_decision = 'Approve', or the canonical status
+  // 'Approved') are eligible. Their feedback is shown per candidate.
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["all-candidates-for-experience"],
     queryFn: async () => {
@@ -100,11 +105,15 @@ export default function ExperienceLetter() {
           resume_url,
           status,
           job_id,
+          feedback_rating,
+          feedback_decision,
+          document_verification_status,
           jobs (
             job_title,
             department
           )
         `)
+        .or("feedback_decision.eq.Approve,status.eq.Approved")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

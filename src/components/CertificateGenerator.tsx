@@ -41,7 +41,31 @@ export interface CertificateCandidate {
   full_name: string;
   email: string;
   phone?: string | null;
+  feedback_rating?: number | null;
+  feedback_decision?: "Approve" | "Reject" | null;
   jobs?: { job_title: string; department?: string | null } | null;
+}
+
+// Working-feedback badge — the feedback that makes a candidate eligible.
+function FeedbackBadge({
+  decision,
+  rating,
+}: {
+  decision?: "Approve" | "Reject" | null;
+  rating?: number | null;
+}) {
+  if (!decision && !rating) return null;
+  const approved = decision === "Approve";
+  const cls = approved
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+    : "bg-muted text-muted-foreground";
+  const stars = rating ? ` · ${"★".repeat(Math.max(0, Math.min(5, Math.round(rating))))}` : "";
+  return (
+    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
+      {approved ? "Feedback: Approved" : `Feedback: ${decision ?? "—"}`}
+      {stars}
+    </span>
+  );
 }
 
 type Salutation = "Mr." | "Ms.";
@@ -496,7 +520,10 @@ export default function CertificateGenerator({
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
             >
               <div className="min-w-0">
-                <p className="font-semibold text-foreground truncate">{c.full_name}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-foreground truncate">{c.full_name}</p>
+                  <FeedbackBadge decision={c.feedback_decision} rating={c.feedback_rating} />
+                </div>
                 <p className="text-sm text-muted-foreground truncate">
                   {c.email}
                   {c.jobs?.job_title ? ` · ${c.jobs.job_title}` : ""}
