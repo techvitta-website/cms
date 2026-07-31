@@ -444,6 +444,179 @@ function jsonResponse(body: Json, status = 200) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Storage mode ("Screen all"): screen candidates whose resume already lives in
+// Supabase Storage. Downloads the PDF and has Gemini read it directly
+// (multimodal) — no PDF library, so it bundles cleanly. ADDITIVE: the original
+// browser-text POST contract is untouched.
+// ---------------------------------------------------------------------------
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+// Split a stored resume_url like "resumes-private/1699_abc.pdf" into bucket + key.
+function splitResumeUrl(resumeUrl: string): { bucket: string | null; key: string } {
+  let path = (resumeUrl || "").trim();
+  path = path.replace(/^https?:\/\/[^/]+\//i, "");
+  path = path.replace(/^storage\/v1\/object\//i, "");
+  path = path.replace(/^(public|sign|download)\//i, "");
+  path = path.replace(/^\//, "");
+  const parts = path.split("/");
+  if (parts.length >= 2 && (parts[0] === "resumes" || parts[0] === "resumes-private")) {
+    return { bucket: parts[0], key: parts.slice(1).join("/") };
+  }
+  return { bucket: null, key: path };
+}
+
+async function downloadResumeBytes(
+  supabase: ReturnType<typeof getAdminClient>,
+  resumeUrl: string,
+): Promise<Uint8Array | null> {
+  const { bucket, key } = splitResumeUrl(resumeUrl);
+  const buckets: string[] = [];
+  if (bucket) buckets.push(bucket);
+  for (const b of ["resumes-private", "resumes"]) if (!buckets.includes(b)) buckets.push(b);
+  const fileName = key.includes("/") ? key.split("/").pop()! : key;
+  for (const b of buckets) {
+    for (const candidateKey of [key, fileName]) {
+      const { data, error } = await supabase.storage.from(b).download(candidateKey);
+      if (!error && data) return new Uint8Array(await data.arrayBuffer());
+    }
+  }
+  return null;
+}
+
+// Last Gemini failure detail (status + snippet), for diagnosable rationales.
+let lastGeminiError = "";
+
+// Gemini reads the PDF bytes directly (multimodal).
+async function callGeminiPdf(base64Pdf: string): Promise<InternExtraction | null> {
+  if (!ENV.GEMINI_API_KEY) return null;
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${ENV.GEMINI_MODEL}:generateContent`;
+  const body = {
+    contents: [{
+      parts: [
+        { inlineData: { mimeType: "application/pdf", data: base64Pdf } },
+        { text: internPrompt("(the resume is attached as a PDF)") },
+      ],
+    }],
+    generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+  };
+  let lastError: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": ENV.GEMINI_API_KEY },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text().catch(() => "");
+        lastGeminiError = `HTTP ${resp.status}: ${errBody.slice(0, 300)}`;
+        // Back off harder on rate limits.
+        if (resp.status === 429) await new Promise((r) => setTimeout(r, 12000 * (i + 1)));
+        throw new Error(`Gemini ${resp.status}`);
+      }
+      const data = await resp.json();
+      const jsonText: string = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
+      const parsed = safeJson<Record<string, unknown>>(jsonText);
+      if (!parsed) {
+        lastGeminiError = `Non-JSON output: ${jsonText.slice(0, 200)}`;
+        throw new Error("Invalid JSON from Gemini");
+      }
+      return normalizeExtraction(parsed);
+    } catch (err) {
+      lastError = err;
+      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  console.warn("Gemini PDF parse failed after retries:", lastError);
+  return null;
+}
+
+type StorageRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  skills: string[] | null;
+  resume_url: string | null;
+};
+
+// Screen one candidate straight from storage. On unreadable resumes we still
+// stamp screened_at (+ a screen_failed flag) so "Screen all" never loops
+// forever on the same broken file.
+async function screenFromStorage(
+  supabase: ReturnType<typeof getAdminClient>,
+  candidate: StorageRow,
+  targetSkills: string[],
+): Promise<Json> {
+  const markFailed = async (reason: string) => {
+    await supabase.from("candidates").update({
+      screened_at: new Date().toISOString(),
+      intern_flags: ["screen_failed"],
+      screening_rationale: reason,
+    }).eq("id", candidate.id);
+    return { candidateId: candidate.id, name: candidate.full_name, ok: false, error: reason };
+  };
+
+  if (!candidate.resume_url) return await markFailed("No resume file on record");
+
+  const bytes = await downloadResumeBytes(supabase, candidate.resume_url);
+  if (!bytes || bytes.length < 100) return await markFailed("Resume file could not be downloaded");
+
+  const fields = await callGeminiPdf(bytesToBase64(bytes));
+  if (!fields) return await markFailed(`AI could not read this resume${lastGeminiError ? ` [${lastGeminiError.slice(0, 220)}]` : ""}`);
+
+  const scored = computeInternScore(fields, targetSkills);
+  const existingSkills = Array.isArray(candidate.skills) ? candidate.skills : [];
+  const mergedSkills = normalizeSkills([...existingSkills, ...fields.skills]);
+
+  const update: Record<string, unknown> = {
+    college: fields.college,
+    degree: fields.degree,
+    branch: fields.branch,
+    graduation_year: fields.graduation_year,
+    cgpa: fields.cgpa,
+    projects: fields.projects,
+    certifications: fields.certifications,
+    skills: mergedSkills,
+    experience_years: fields.experience_years,
+    education: fields.education,
+    screening_score: scored.score,
+    screening_tier: scored.tier,
+    screening_rationale: scored.rationale,
+    intern_flags: scored.flags,
+    resume_processed: true,
+    screened_at: new Date().toISOString(),
+  };
+  if (!candidate.full_name && fields.name) update.full_name = fields.name;
+  if (!candidate.email && fields.email) update.email = fields.email;
+  if (!candidate.phone && fields.phone) update.phone = fields.phone;
+
+  const { error: upErr } = await supabase.from("candidates").update(update).eq("id", candidate.id);
+  if (upErr) return { candidateId: candidate.id, name: candidate.full_name, ok: false, error: upErr.message };
+
+  return { candidateId: candidate.id, name: candidate.full_name, ok: true, score: scored.score, tier: scored.tier };
+}
+
+async function countRemaining(supabase: ReturnType<typeof getAdminClient>): Promise<number> {
+  const { count } = await supabase
+    .from("candidates")
+    .select("id", { count: "exact", head: true })
+    .not("resume_url", "is", null)
+    .neq("resume_url", "")
+    .is("screened_at", null);
+  return count ?? 0;
+}
+
 Deno.serve(async (req) => {
   try {
     if (req.method === "OPTIONS") {
@@ -460,14 +633,49 @@ Deno.serve(async (req) => {
     }
 
     const payload = await req.json().catch(() => ({}));
+    const targetSkillsStorage: string[] = Array.isArray(payload?.targetSkills)
+      ? payload.targetSkills.map((s: unknown) => String(s))
+      : [];
+
+    // "Screen all" mode: process a small batch of stored resumes per call; the
+    // frontend loops until `remaining` is 0. Never touches candidate status.
+    if (payload?.fromStorage) {
+      const supabase = getAdminClient();
+      const limit = Math.max(1, Math.min(8, Number(payload?.limit ?? 5)));
+      let query = supabase
+        .from("candidates")
+        .select("id, full_name, email, phone, skills, resume_url")
+        .not("resume_url", "is", null)
+        .neq("resume_url", "")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (Array.isArray(payload?.candidateIds) && payload.candidateIds.length > 0) {
+        query = query.in("id", payload.candidateIds.map(String));
+      } else if (payload?.onlyUnscored !== false) {
+        query = query.is("screened_at", null);
+      }
+      const { data: rows, error: qErr } = await query;
+      if (qErr) return jsonResponse({ ok: false, error: qErr.message }, 500);
+
+      const results: Json[] = [];
+      for (const row of rows ?? []) {
+        try {
+          results.push(await screenFromStorage(supabase, row as StorageRow, targetSkillsStorage));
+        } catch (err) {
+          results.push({ candidateId: (row as any)?.id, ok: false, error: String(err) });
+        }
+      }
+      const remaining = await countRemaining(supabase);
+      const screenedNow = results.filter((r: any) => r?.ok).length;
+      return jsonResponse({ ok: true, mode: "storage", processed: results.length, screened: screenedNow, remaining, results });
+    }
+
     const rawItems: any[] = Array.isArray(payload?.candidates)
       ? payload.candidates
       : payload?.candidateId && payload?.resumeText
       ? [{ candidateId: payload.candidateId, resumeText: payload.resumeText, fileName: payload.fileName }]
       : [];
-    const targetSkills: string[] = Array.isArray(payload?.targetSkills)
-      ? payload.targetSkills.map((s: unknown) => String(s))
-      : [];
+    const targetSkills: string[] = targetSkillsStorage;
 
     if (rawItems.length === 0) {
       return jsonResponse({ ok: false, error: "candidates array is required" }, 400);
