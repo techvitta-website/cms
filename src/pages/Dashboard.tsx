@@ -1876,6 +1876,54 @@ export default function Dashboard() {
     }
   };
 
+  // Ask a candidate (by email) to upload their missing resume. The email
+  // contains a public link to /{candidateId}/upload-resume where the PDF is
+  // collected and attached to their record automatically.
+  const [requestingResumeId, setRequestingResumeId] = useState<string | null>(null);
+  const handleRequestResume = async (candidate: CandidateRow) => {
+    const email = candidate.email && candidate.email !== "—" ? candidate.email : null;
+    if (!email) {
+      toast({
+        title: "No email on file",
+        description: "Add the candidate's email (Edit) before requesting their resume.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setRequestingResumeId(candidate.id);
+    try {
+      const uploadLink = `${window.location.origin}/${candidate.id}/upload-resume`;
+      const { data, error } = await supabase.functions.invoke("send-email", {
+        body: {
+          to: email,
+          candidateName: candidate.name,
+          emailType: "request-resume",
+          data: { uploadLink },
+        },
+      });
+      if (error) throw error;
+      if (data && data.success === false) throw new Error(data.error || "Email failed");
+
+      void supabase.from("activity_logs").insert({
+        event_type: "RESUME_REQUESTED",
+        description: `Resume requested from ${candidate.name} (${email})`,
+      } as any);
+
+      toast({
+        title: "Resume requested",
+        description: `${candidate.name} has been emailed an upload link. Their resume will attach automatically once uploaded.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Could not send request",
+        description: err?.message || "Failed to send the resume request email.",
+        variant: "destructive",
+      });
+    } finally {
+      setRequestingResumeId(null);
+    }
+  };
+
   const handleDeleteClick = async (candidate: CandidateRow) => {
     console.log("Archive clicked for candidate:", candidate.id, candidate.name);
     setDeleting(true);
@@ -3456,11 +3504,16 @@ export default function Dashboard() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              disabled
-                              className="h-8 w-8 p-0 opacity-50 cursor-not-allowed"
-                              title="No Resume Available - Click Edit to upload"
+                              onClick={() => handleRequestResume(candidate)}
+                              disabled={requestingResumeId === candidate.id}
+                              className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                              title="No resume on file — email the candidate an upload link"
                             >
-                              <FileX className="h-4 w-4 text-muted-foreground" />
+                              {requestingResumeId === candidate.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Mail className="h-4 w-4" />
+                              )}
                             </Button>
                           )}
                           <Button

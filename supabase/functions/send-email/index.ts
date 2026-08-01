@@ -291,12 +291,21 @@ serve(async (req) => {
       }
 
       case "request-resume": {
+        const resumeUploadLink = data?.uploadLink || "";
         subject = `Request to Upload Your Updated Resume – ${companyName}`;
         htmlContent = `
           <p>Dear ${candidateName},</p>
           <p>We hope you are doing well.</p>
           <p>As part of the recruitment process at <b>${companyName}</b>, we request you to share your latest and updated resume so that we can proceed with the next steps of your application.</p>
-          <p>Please reply to this email with your resume attached in PDF format, or share a secure link from where we can download it.</p>
+          ${resumeUploadLink
+            ? `
+          <p style="text-align:center;margin:24px 0;">
+            <a href="${resumeUploadLink}" style="background:#4f46e5;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">Upload Your Resume</a>
+          </p>
+          <p>Click the button above to upload your resume (PDF) — it attaches to your application automatically. If the button doesn't work, open this link:<br/><a href="${resumeUploadLink}">${resumeUploadLink}</a></p>
+          <p>You can also reply to this email with your resume attached instead.</p>`
+            : `
+          <p>Please reply to this email with your resume attached in PDF format, or share a secure link from where we can download it.</p>`}
           <p>If you have already shared your resume recently, you can ignore this message.</p>
           <p>Warm regards,<br/>HR Team<br/>${companyName}</p>
         `;

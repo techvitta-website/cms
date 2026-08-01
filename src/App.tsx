@@ -18,6 +18,7 @@ import Feedback from "./pages/Feedback";
 import DocumentVerification from "./pages/DocumentVerification";
 import UploadDocuments from "./pages/UploadDocuments";
 import UploadDocumentsLanding from "./pages/UploadDocumentsLanding";
+import UploadResume from "./pages/UploadResume";
 
 
 
@@ -1413,6 +1414,7 @@ const App = () => (
             <Route path="/apply" element={<PublicCandidateForm />} />
             <Route path="/candidate-form" element={<PublicCandidateForm />} />
             <Route path="/upload-documents" element={<UploadDocumentsLanding />} />
+            <Route path="/:id/upload-resume" element={<UploadResume />} />
             <Route path="/:id/upload-documents" element={<UploadDocuments />} />
             <Route
               path="/dashboard"
