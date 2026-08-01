@@ -88,9 +88,9 @@ export const menuSections: MenuSection[] = [
     title: "Talent Sourcing",
     accent: "violet",
     items: [
+      { icon: Radar, label: "Source Interns", path: "/intern-sourcing" },
       { icon: Briefcase, label: "Recruitment Hub", path: "/recruitment-hub" },
       { icon: GraduationCap, label: "Intern Screening", path: "/intern-screening" },
-      { icon: Radar, label: "Source Interns", path: "/intern-sourcing" },
     ],
   },
   {
