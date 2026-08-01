@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import CandidateActionsMenu from "@/components/CandidateActionsMenu";
 import { extractTextFromPDFFile, extractTextFromSupabaseStorage } from "@/lib/pdfExtractor";
 import JSZip from "jszip";
 
@@ -152,6 +153,7 @@ export default function InternScreening() {
         .select(
           "id, full_name, email, phone, status, resume_url, skills, college, degree, branch, graduation_year, cgpa, batch_tag, source_portal, screening_score, screening_tier, screening_rationale, intern_flags, resume_processed, screened_at",
         )
+        .or("is_archived.is.null,is_archived.eq.false")
         .order("screening_score", { ascending: false, nullsFirst: false })
         .limit(2000);
       if (error) throw error;
@@ -838,9 +840,15 @@ export default function InternScreening() {
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Button variant="outline" size="sm" onClick={() => handleView(c.resume_url)}>
-                            <Eye className="h-3 w-3 mr-1" /> View
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button variant="outline" size="sm" onClick={() => handleView(c.resume_url)}>
+                              <Eye className="h-3 w-3 mr-1" /> View
+                            </Button>
+                            <CandidateActionsMenu
+                              candidateId={c.id}
+                              candidateName={c.full_name || "Candidate"}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

@@ -1,27 +1,14 @@
 import { useState } from "react";
-import { MoreVertical, Archive, Trash2, Loader2 } from "lucide-react";
+import { Trash2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
-// Per-candidate admin actions available from any stage/page:
-//   • Move to Archive  — soft-remove; candidate shows on Archived Candidates.
-//   • Delete candidate — permanent; DB foreign keys cascade/​set-null related rows.
+// A per-candidate Delete button that behaves exactly like the Dashboard's:
+// it does NOT permanently delete — it archives the candidate (is_archived = true)
+// so they drop off the current screen/stage and appear on Archived Candidates,
+// where they can be restored. Available from every screen and stage.
 export default function CandidateActionsMenu({
   candidateId,
   candidateName,
@@ -32,13 +19,8 @@ export default function CandidateActionsMenu({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [archiving, setArchiving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // Archive/delete affect many lists across the app — refresh everything.
-  const refreshAll = () => queryClient.invalidateQueries();
-
-  const handleArchive = async () => {
+  const handleDelete = async () => {
     setArchiving(true);
     try {
       const { error } = await supabase
@@ -52,11 +34,14 @@ export default function CandidateActionsMenu({
         details: `${candidateName} moved to Archived Candidates`,
       });
 
+      // Archive/delete affects many lists across the app — refresh everything so
+      // the candidate disappears here and shows up under Archived Candidates.
+      queryClient.invalidateQueries();
+
       toast({
-        title: "Archived",
-        description: `${candidateName} has been moved to Archived Candidates.`,
+        title: "Moved to Archived",
+        description: `${candidateName} has been archived. Restore them from Archived Candidates.`,
       });
-      refreshAll();
     } catch (e: any) {
       toast({
         title: "Error",
@@ -68,99 +53,24 @@ export default function CandidateActionsMenu({
     }
   };
 
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      const { error } = await supabase.from("candidates").delete().eq("id", candidateId);
-      if (error) throw error;
-
-      toast({
-        title: "Deleted",
-        description: `${candidateName} has been permanently deleted.`,
-      });
-      setConfirmDeleteOpen(false);
-      refreshAll();
-    } catch (e: any) {
-      const fk = e?.code === "23503" || /foreign key/i.test(e?.message || "");
-      toast({
-        title: fk ? "Couldn't delete" : "Error",
-        description: fk
-          ? "This candidate is still linked to other records. Use Archive instead."
-          : e.message || "Failed to delete candidate.",
-        variant: "destructive",
-      });
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            aria-label="Candidate actions"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <MoreVertical className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleArchive} disabled={archiving}>
-            {archiving ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Archive className="h-4 w-4 mr-2" />
-            )}
-            Move to Archive
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => setConfirmDeleteOpen(true)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete candidate
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {candidateName}?</DialogTitle>
-            <DialogDescription>
-              This permanently removes the candidate and their related records (interviews,
-              documents, letters). This can't be undone — if you might need them later, use
-              Archive instead.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmDeleteOpen(false)}
-              disabled={deleting}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete permanently
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+      title="Delete candidate (move to Archived)"
+      aria-label="Delete candidate"
+      onClick={(e) => {
+        e.stopPropagation();
+        void handleDelete();
+      }}
+      disabled={archiving}
+    >
+      {archiving ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <Trash2 className="h-4 w-4" />
+      )}
+    </Button>
   );
 }

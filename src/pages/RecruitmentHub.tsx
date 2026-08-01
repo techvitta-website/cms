@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import CandidateActionsMenu from "@/components/CandidateActionsMenu";
 import { extractTextFromPDFUrl, extractTextFromSupabaseStorage } from "@/lib/pdfExtractor";
 import {
   Dialog,
@@ -1444,16 +1445,24 @@ export default function RecruitmentHub() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openEditDialogMatch(r, i)}
-                            className="w-full"
-                            disabled={isProcessing || isUpdatingStatus}
-                          >
-                            <Edit className="h-3 w-3 mr-1" />
-                            Edit
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEditDialogMatch(r, i)}
+                              className="flex-1"
+                              disabled={isProcessing || isUpdatingStatus}
+                            >
+                              <Edit className="h-3 w-3 mr-1" />
+                              Edit
+                            </Button>
+                            {r.candidateId && (
+                              <CandidateActionsMenu
+                                candidateId={r.candidateId}
+                                candidateName={r.name}
+                              />
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
