@@ -86,6 +86,8 @@ interface RawCandidate {
   reference_source?: string | null;
   referrer_name?: string | null;
   is_archived?: boolean | null;
+  resume_request_count?: number | null;
+  resume_requested_at?: string | null;
   jobs?: {
     job_title: string | null;
   } | null;
@@ -104,6 +106,8 @@ interface CandidateRow {
   resumeUrl: string | null;
   referenceSource?: string | null;
   referrerName?: string | null;
+  resumeRequestCount?: number;
+  resumeRequestedAt?: string | null;
 }
 
 const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
@@ -433,6 +437,8 @@ export default function Dashboard() {
             reference_source,
             referrer_name,
             is_archived,
+            resume_request_count,
+            resume_requested_at,
             matches (
               match_score,
               job_id
@@ -1369,6 +1375,8 @@ export default function Dashboard() {
         resumeUrl: candidate.resume_url,
         referenceSource: candidate.reference_source ?? null,
         referrerName: candidate.referrer_name ?? null,
+        resumeRequestCount: candidate.resume_request_count ?? 0,
+        resumeRequestedAt: candidate.resume_requested_at ?? null,
       };
     });
   }, [jobMap, latestCandidatesRaw]);
@@ -1919,14 +1927,29 @@ export default function Dashboard() {
       if (error) throw error;
       if (data && data.success === false) throw new Error(data.error || "Email failed");
 
+      // Record the reminder cycle: count + timestamp. After 3 reminders with
+      // no upload, the follow-up badge suggests archiving the candidate.
+      const newCount = (candidate.resumeRequestCount ?? 0) + 1;
+      if (!candidate.id.startsWith("storage-")) {
+        await supabase
+          .from("candidates")
+          .update({ resume_request_count: newCount, resume_requested_at: new Date().toISOString() } as any)
+          .eq("id", candidate.id);
+      }
+
       void supabase.from("activity_logs").insert({
         event_type: "RESUME_REQUESTED",
-        description: `Resume requested from ${candidate.name} (${email})`,
+        description: `Resume reminder ${newCount} sent to ${candidate.name} (${email})`,
       } as any);
 
+      await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+
       toast({
-        title: "Resume requested",
-        description: `${candidate.name} has been emailed an upload link. Their resume will attach automatically once uploaded.`,
+        title: `Resume reminder ${Math.min(newCount, 3)} of 3 sent`,
+        description:
+          newCount >= 3
+            ? `${candidate.name} has now been reminded ${newCount} times. If no resume arrives, use Delete to move them to Archived Candidates.`
+            : `${candidate.name} has been emailed an upload link. Their resume will attach automatically once uploaded.`,
       });
     } catch (err: any) {
       toast({
@@ -3429,7 +3452,7 @@ export default function Dashboard() {
                   <TableHead>Stage</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead className="text-right">Phone</TableHead>
-                  <TableHead>Referred By</TableHead>
+                  <TableHead>Resume Follow-up</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -3496,12 +3519,35 @@ export default function Dashboard() {
                         {candidate.phone}
                       </TableCell>
                       <TableCell>
-                        {candidate.referrerName ? (
-                          <Badge variant="secondary" className="bg-blue-50 text-blue-700">
-                            {candidate.referrerName}
+                        {candidate.resumeUrl ? (
+                          <span className="text-muted-foreground text-sm">—</span>
+                        ) : !candidate.email || candidate.email === "—" ? (
+                          <Badge variant="secondary" className="bg-red-50 text-red-700">
+                            No resume · no email
+                          </Badge>
+                        ) : (candidate.resumeRequestCount ?? 0) === 0 ? (
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+                            No resume — not requested
                           </Badge>
                         ) : (
-                          <span className="text-muted-foreground text-sm">—</span>
+                          <div className="flex flex-col gap-0.5">
+                            <Badge
+                              variant="secondary"
+                              className={
+                                (candidate.resumeRequestCount ?? 0) >= 3
+                                  ? "bg-red-50 text-red-700 w-fit"
+                                  : "bg-amber-50 text-amber-700 w-fit"
+                              }
+                            >
+                              Reminder {Math.min(candidate.resumeRequestCount ?? 0, 3)} of 3
+                              {(candidate.resumeRequestCount ?? 0) >= 3 ? " — archive?" : ""}
+                            </Badge>
+                            {candidate.resumeRequestedAt && (
+                              <span className="text-[11px] text-muted-foreground">
+                                last sent {formatDistanceToNow(new Date(candidate.resumeRequestedAt), { addSuffix: true })}
+                              </span>
+                            )}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
