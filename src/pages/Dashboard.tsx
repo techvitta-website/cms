@@ -600,14 +600,24 @@ export default function Dashboard() {
       // allCandidates excludes archived rows, so without this an archived
       // candidate's PDF becomes "unclaimed" and Step 4 resurrects them as a
       // fresh storage-only row on the next load — undoing the archive.
+      // Also collect every known DB candidate email (active + archived) for
+      // the strict one-email-one-candidate rule applied after extraction.
+      const dbCandidatesByEmail = new Map<string, RawCandidate>();
+      for (const candidate of allCandidates) {
+        if (candidate.email) {
+          dbCandidatesByEmail.set(String(candidate.email).toLowerCase(), candidate);
+        }
+      }
       try {
         const { data: archivedRows } = await supabase
           .from('candidates')
           .select('id, full_name, email, phone, status, created_at, job_id, resume_url')
-          .eq('is_archived', true)
-          .not('resume_url', 'is', null);
+          .eq('is_archived', true);
 
         for (const archived of (archivedRows || []) as RawCandidate[]) {
+          if (archived.email && !dbCandidatesByEmail.has(String(archived.email).toLowerCase())) {
+            dbCandidatesByEmail.set(String(archived.email).toLowerCase(), archived);
+          }
           const { normalized, filename } = parseStorageLocation(archived.resume_url);
           if (normalized && !candidatesByResumeUrl.has(normalized)) {
             candidatesByResumeUrl.set(normalized, archived);
@@ -1106,6 +1116,62 @@ export default function Dashboard() {
       }
 
       console.log(`✅ Completed processing all ${totalFiles} storage files`);
+
+      // Step 4.5: STRICT one-email-one-candidate rule. A storage-only row whose
+      // extracted email matches ANY database candidate (active or archived) is
+      // a duplicate upload of the same person — never show it. If the matching
+      // DB row has no resume_url yet, claim this file for it (self-heal);
+      // otherwise delete the duplicate file so it can't respawn after a
+      // permanent delete. Storage-only rows also dedupe among themselves.
+      const duplicateFilesToRemove: { bucket: string; filename: string }[] = [];
+      const claimUpdates: { id: string; resume_url: string }[] = [];
+      const seenStorageEmails = new Set<string>();
+
+      allCandidates = allCandidates.filter((candidate) => {
+        if (!String(candidate.id).startsWith('storage-')) return true;
+        const em = candidate.email ? String(candidate.email).toLowerCase() : null;
+        if (!em) return true; // no email extracted — nothing to match on
+
+        const dbTwin = dbCandidatesByEmail.get(em);
+        if (dbTwin) {
+          const { bucket, filename } = (() => {
+            const parts = String(candidate.resume_url || '').split('/');
+            return parts.length >= 2
+              ? { bucket: parts[0], filename: parts.slice(1).join('/') }
+              : { bucket: '', filename: '' };
+          })();
+          if (!dbTwin.resume_url && candidate.resume_url) {
+            // The person's DB row lost/never had its file — attach this one.
+            claimUpdates.push({ id: dbTwin.id, resume_url: candidate.resume_url });
+          } else if (bucket && filename) {
+            // The person already has their canonical file — this is a duplicate
+            // upload; remove it so it can never resurrect them.
+            duplicateFilesToRemove.push({ bucket, filename });
+          }
+          return false;
+        }
+
+        if (seenStorageEmails.has(em)) return false; // duplicate among files
+        seenStorageEmails.add(em);
+        return true;
+      });
+
+      // Best-effort side cleanup — failures only log, the list still renders.
+      if (claimUpdates.length > 0) {
+        void Promise.allSettled(
+          claimUpdates.map(({ id, resume_url }) =>
+            supabase.from('candidates').update({ resume_url }).eq('id', id)
+          )
+        );
+      }
+      if (duplicateFilesToRemove.length > 0) {
+        console.log(`Removing ${duplicateFilesToRemove.length} duplicate resume file(s)...`);
+        void Promise.allSettled(
+          duplicateFilesToRemove.map(({ bucket, filename }) =>
+            supabase.storage.from(bucket).remove([filename])
+          )
+        );
+      }
 
       // Step 5: Final deduplication
       const uniqueCandidatesMap = new Map<string, RawCandidate>();
