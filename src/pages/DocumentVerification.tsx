@@ -407,13 +407,14 @@ export default function DocumentVerification() {
       // verify/reject fail with a foreign-key violation.
       const verifiedBy = hrUser?.id ?? null;
 
-      // Get all pending documents
-      const pendingDocs = candidateDocuments.filter(doc => doc.verification_status === 'pending');
-      
+      // Verify every document that isn't already verified — including ones that
+      // were previously rejected/set back, so HR can re-verify them in bulk.
+      const pendingDocs = candidateDocuments.filter(doc => doc.verification_status !== 'verified');
+
       if (pendingDocs.length === 0) {
         toast({
-          title: "No Pending Documents",
-          description: "All documents have already been verified.",
+          title: "Nothing to verify",
+          description: "All documents are already verified.",
           variant: "default",
         });
         setVerifyingDocId(null);
@@ -436,7 +437,7 @@ export default function DocumentVerification() {
       // Update local state
       setCandidateDocuments(prev =>
         prev.map(doc =>
-          doc.verification_status === 'pending'
+          doc.verification_status !== 'verified'
             ? {
                 ...doc,
                 verification_status: 'verified',
@@ -448,7 +449,7 @@ export default function DocumentVerification() {
 
       // Check if all required documents are verified
       const updatedDocs = candidateDocuments.map(doc =>
-        doc.verification_status === 'pending' ? { ...doc, verification_status: 'verified' } : doc
+        doc.verification_status !== 'verified' ? { ...doc, verification_status: 'verified' } : doc
       );
       const allRequiredDocs = updatedDocs.filter(doc => 
         ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
@@ -702,6 +703,14 @@ export default function DocumentVerification() {
             : doc
         )
       );
+
+      // A rejected/set-back document means the set is no longer fully verified,
+      // so move the candidate back to "submitted" for re-review.
+      await supabase
+        .from('candidates')
+        .update({ document_verification_status: 'submitted' })
+        .eq('id', selectedCandidate.id);
+      queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
 
       toast({
         title: "Document Rejected",
@@ -1203,10 +1212,10 @@ export default function DocumentVerification() {
             </div>
           ) : (
             <div className="space-y-4">
-              {candidateDocuments.some((d) => d.verification_status === "pending") && (
+              {candidateDocuments.some((d) => d.verification_status !== "verified") && (
                 <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/40 p-3">
                   <p className="text-sm text-muted-foreground">
-                    {candidateDocuments.filter((d) => d.verification_status === "pending").length} pending —
+                    {candidateDocuments.filter((d) => d.verification_status !== "verified").length} not verified —
                     verify all at once, or review each below.
                   </p>
                   <Button
@@ -1301,9 +1310,12 @@ export default function DocumentVerification() {
                         </div>
                       )}
 
-                      {/* Individual Verify and Reject buttons for pending documents */}
-                      {doc.verification_status === 'pending' && (
-                        <div className="flex gap-2 mt-4 pt-4 border-t">
+                      {/* Verify / reject actions. A verified doc can be set back
+                          (reject); a rejected doc can be re-verified. So a Verify
+                          button shows for anything not yet verified, and a Reject
+                          / Set-back button for anything not yet rejected. */}
+                      <div className="flex gap-2 mt-4 pt-4 border-t">
+                        {doc.verification_status !== 'verified' && (
                           <Button
                             variant="default"
                             size="sm"
@@ -1319,10 +1331,12 @@ export default function DocumentVerification() {
                             ) : (
                               <>
                                 <CheckCircle className="h-4 w-4 mr-2" />
-                                Verify
+                                {doc.verification_status === 'rejected' ? 'Re-verify' : 'Verify'}
                               </>
                             )}
                           </Button>
+                        )}
+                        {doc.verification_status !== 'rejected' && (
                           <Button
                             variant="destructive"
                             size="sm"
@@ -1338,12 +1352,12 @@ export default function DocumentVerification() {
                             ) : (
                               <>
                                 <XCircle className="h-4 w-4 mr-2" />
-                                Reject
+                                {doc.verification_status === 'verified' ? 'Set back' : 'Reject'}
                               </>
                             )}
                           </Button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 );
