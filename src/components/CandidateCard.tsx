@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import CandidateActionsMenu from "@/components/CandidateActionsMenu";
+import CandidateJobEditor from "@/components/CandidateJobEditor";
 
 interface CandidateCardProps {
   id: string;
@@ -66,12 +67,11 @@ export default function CandidateCard({
             >
               {fullName}
             </h3>
-            <span
-              className="text-xs sm:text-sm text-muted-foreground truncate sm:w-[170px] shrink-0"
-              title={appliedJob || undefined}
-            >
-              {appliedJob || "—"}
-            </span>
+            <CandidateJobEditor
+              candidateId={id}
+              jobTitle={appliedJob}
+              className="sm:w-[170px] shrink-0"
+            />
             <span className="sm:w-[130px] shrink-0">{getStatusBadge(status)}</span>
             {resumeUrl && (
               <Button
@@ -122,11 +122,10 @@ export default function CandidateCard({
                   <span className="font-medium">Phone:</span> {phone}
                 </p>
               )}
-              {appliedJob && (
-                <p className="break-words sm:truncate">
-                  <span className="font-medium">Applied Job:</span> {appliedJob}
-                </p>
-              )}
+              <p className="break-words sm:truncate flex items-center gap-1">
+                <span className="font-medium">Applied Job:</span>
+                <CandidateJobEditor candidateId={id} jobTitle={appliedJob} />
+              </p>
             </div>
           </div>
           <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
