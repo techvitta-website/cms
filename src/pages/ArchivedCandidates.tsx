@@ -12,8 +12,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, FileX } from "lucide-react";
+import { Loader2, RefreshCw, FileX, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface RawCandidate {
   id: string;
@@ -34,6 +42,8 @@ export default function ArchivedCandidates() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [unarchivingCandidateId, setUnarchivingCandidateId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [toDelete, setToDelete] = useState<RawCandidate | null>(null);
 
   // Fetch archived candidates
   const { data: archivedCandidates = [], refetch: refetchArchived, isLoading } = useQuery({
@@ -108,13 +118,41 @@ export default function ArchivedCandidates() {
     }
   };
 
+  // Permanently delete a candidate from the database. Foreign keys cascade /
+  // set-null, so their interviews, documents and letters are removed too.
+  const handleDeletePermanently = async () => {
+    if (!toDelete) return;
+    setDeletingId(toDelete.id);
+    try {
+      const { error } = await supabase.from("candidates").delete().eq("id", toDelete.id);
+      if (error) throw error;
+
+      await queryClient.invalidateQueries();
+      toast({
+        title: "Deleted permanently",
+        description: `${toDelete.full_name} and all their records have been removed from the database.`,
+      });
+      setToDelete(null);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete candidate.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+      refetchArchived();
+    }
+  };
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Archived Candidates</CardTitle>
           <CardDescription>
-            View and restore archived candidates. Unarchive a candidate to restore them to the dashboard.
+            Restore an archived candidate with Unarchive, or use Delete to permanently remove them
+            (and all their records) from the database — this can't be undone.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -152,24 +190,44 @@ export default function ArchivedCandidates() {
                       {(candidate.jobs as any)?.job_title || "—"}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleUnarchive(candidate.id)}
-                        disabled={unarchivingCandidateId === candidate.id}
-                      >
-                        {unarchivingCandidateId === candidate.id ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            Unarchiving...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Unarchive
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUnarchive(candidate.id)}
+                          disabled={unarchivingCandidateId === candidate.id || deletingId === candidate.id}
+                        >
+                          {unarchivingCandidateId === candidate.id ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Unarchiving...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Unarchive
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setToDelete(candidate)}
+                          disabled={deletingId === candidate.id}
+                        >
+                          {deletingId === candidate.id ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -178,6 +236,38 @@ export default function ArchivedCandidates() {
           )}
         </CardContent>
       </Card>
+
+      {/* Permanent delete confirmation */}
+      <Dialog open={!!toDelete} onOpenChange={(open) => !open && !deletingId && setToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {toDelete?.full_name} permanently?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the candidate and all of their related records — interviews,
+              uploaded documents, and offer / experience / rejection letters — from the database.
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setToDelete(null)} disabled={!!deletingId}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeletePermanently} disabled={!!deletingId}>
+              {deletingId ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete permanently
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
