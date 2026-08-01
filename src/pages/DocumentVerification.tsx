@@ -81,6 +81,7 @@ export default function DocumentVerification() {
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [rejectingDocId, setRejectingDocId] = useState<string | null>(null);
+  const [verifyingRowId, setVerifyingRowId] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState("");
@@ -729,6 +730,58 @@ export default function DocumentVerification() {
     }
   };
 
+  // One-click: verify all of a candidate's documents straight from the list,
+  // without opening the dialog. Verifies every non-verified doc and marks the
+  // candidate verified.
+  const handleQuickVerifyAll = async (candidate: Candidate) => {
+    setVerifyingRowId(candidate.id);
+    try {
+      const verifiedBy = hrUser?.id ?? null;
+      const { data: docs, error } = await supabase
+        .from("candidate_documents")
+        .select("id, verification_status")
+        .eq("candidate_id", candidate.id);
+      if (error) throw error;
+
+      const toVerify = (docs || []).filter((d: any) => d.verification_status !== "verified");
+      if (toVerify.length > 0) {
+        const { error: updErr } = await supabase
+          .from("candidate_documents")
+          .update({
+            verification_status: "verified",
+            verified_at: new Date().toISOString(),
+            verified_by: verifiedBy,
+          })
+          .in(
+            "id",
+            toVerify.map((d: any) => d.id),
+          );
+        if (updErr) throw updErr;
+      }
+
+      await supabase
+        .from("candidates")
+        .update({ document_verification_status: "verified" })
+        .eq("id", candidate.id);
+
+      queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["candidate-document-counts"] });
+
+      toast({
+        title: "All documents verified",
+        description: `${candidate.full_name}'s documents have been verified.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to verify documents",
+        variant: "destructive",
+      });
+    } finally {
+      setVerifyingRowId(null);
+    }
+  };
+
   // Send document request email mutation
   const sendDocumentRequestMutation = useMutation({
     mutationFn: async (candidate: Candidate) => {
@@ -1044,9 +1097,28 @@ export default function DocumentVerification() {
                             <Mail className="h-4 w-4 mr-2" />
                             Resend Link
                           </Button>
-                          <Button 
-                            variant="outline" 
-                            onClick={() => handleViewDocuments(candidate)} 
+                          {documentCounts[candidate.id] > 0 && (
+                            <Button
+                              onClick={() => handleQuickVerifyAll(candidate)}
+                              disabled={verifyingRowId === candidate.id}
+                              className="bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+                            >
+                              {verifyingRowId === candidate.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Verifying...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="h-4 w-4 mr-2" />
+                                  Verify All
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            onClick={() => handleViewDocuments(candidate)}
                             className="whitespace-nowrap"
                           >
                             <Eye className="h-4 w-4 mr-2" />
@@ -1055,14 +1127,33 @@ export default function DocumentVerification() {
                         </>
                       )}
                       {candidate.document_verification_status === "submitted" && (
-                        <Button 
-                          variant="outline" 
-                          onClick={() => handleViewDocuments(candidate)} 
-                          className="whitespace-nowrap"
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Documents ({documentCounts[candidate.id] || 0})
-                        </Button>
+                        <>
+                          <Button
+                            onClick={() => handleQuickVerifyAll(candidate)}
+                            disabled={verifyingRowId === candidate.id}
+                            className="bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+                          >
+                            {verifyingRowId === candidate.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Verifying...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Verify All
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => handleViewDocuments(candidate)}
+                            className="whitespace-nowrap"
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            View Documents ({documentCounts[candidate.id] || 0})
+                          </Button>
+                        </>
                       )}
                       {candidate.document_verification_status === "verified" && (
                         <Button 
