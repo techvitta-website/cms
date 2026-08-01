@@ -120,6 +120,7 @@ export default function Shortlist() {
           )
         `)
         .eq("status", "Shortlisted")
+        .or("is_archived.is.null,is_archived.eq.false")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

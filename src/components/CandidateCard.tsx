@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import CandidateActionsMenu from "@/components/CandidateActionsMenu";
 
 interface CandidateCardProps {
   id: string;
@@ -17,6 +18,9 @@ interface CandidateCardProps {
   // layout with all candidate info on one row (easier to scan/filter), with any
   // action controls (children) below a divider.
   variant?: "card" | "row";
+  // When true, shows a per-candidate actions menu (Move to Archive / Delete)
+  // available from any page/stage.
+  adminActions?: boolean;
 }
 
 function getStatusBadge(status?: string) {
@@ -48,6 +52,7 @@ export default function CandidateCard({
   onViewResume,
   children,
   variant = "card",
+  adminActions = true,
 }: CandidateCardProps) {
   if (variant === "row") {
     return (
@@ -81,6 +86,11 @@ export default function CandidateCard({
             )}
             {children && (
               <div className="flex flex-wrap items-center gap-2 ml-auto">{children}</div>
+            )}
+            {adminActions && (
+              <div className={children ? "shrink-0" : "ml-auto shrink-0"}>
+                <CandidateActionsMenu candidateId={id} candidateName={fullName} />
+              </div>
             )}
           </div>
         </CardContent>
@@ -120,6 +130,11 @@ export default function CandidateCard({
             </div>
           </div>
           <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
+            {adminActions && (
+              <div className="order-last sm:order-first">
+                <CandidateActionsMenu candidateId={id} candidateName={fullName} />
+              </div>
+            )}
             {status && (
               <div className="hidden sm:block">
                 {getStatusBadge(status)}

@@ -133,6 +133,7 @@ export default function Feedback() {
           )
         `)
         .eq("status", "Interview Scheduled")
+        .or("is_archived.is.null,is_archived.eq.false")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

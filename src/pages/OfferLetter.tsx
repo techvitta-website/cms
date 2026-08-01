@@ -320,6 +320,7 @@ export default function OfferLetter() {
           )
         `)
         .or("feedback_decision.eq.Approve,status.eq.Approved")
+        .or("is_archived.is.null,is_archived.eq.false")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
