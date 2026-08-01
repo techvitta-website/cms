@@ -596,6 +596,38 @@ export default function Dashboard() {
         }
       }
 
+      // Step 3.5: ARCHIVED candidates must also claim their resume files.
+      // allCandidates excludes archived rows, so without this an archived
+      // candidate's PDF becomes "unclaimed" and Step 4 resurrects them as a
+      // fresh storage-only row on the next load — undoing the archive.
+      try {
+        const { data: archivedRows } = await supabase
+          .from('candidates')
+          .select('id, full_name, email, phone, status, created_at, job_id, resume_url')
+          .eq('is_archived', true)
+          .not('resume_url', 'is', null);
+
+        for (const archived of (archivedRows || []) as RawCandidate[]) {
+          const { normalized, filename } = parseStorageLocation(archived.resume_url);
+          if (normalized && !candidatesByResumeUrl.has(normalized)) {
+            candidatesByResumeUrl.set(normalized, archived);
+          }
+          if (filename) {
+            if (!candidatesByFilename.has(filename)) {
+              candidatesByFilename.set(filename, archived);
+            }
+            for (const bucket of buckets) {
+              const key = `${bucket}/${filename}`;
+              if (!candidatesByResumeUrl.has(key)) {
+                candidatesByResumeUrl.set(key, archived);
+              }
+            }
+          }
+        }
+      } catch {
+        /* is_archived column missing — legacy behaviour, nothing to claim */
+      }
+
       // Step 4: Add storage files that don't have database entries and extract name, email, phone
       // Use the EXACT same comprehensive name extraction logic as matching engine (ats-processor)
       const extractCandidateName = (text: string, email: string | null = null, fileName: string = ""): string => {
@@ -1848,8 +1880,64 @@ export default function Dashboard() {
 
         console.log("✅ Archive operation completed successfully");
       } else {
-        // For storage-only candidates, we can't archive them in the database
-        // They will reappear on refresh, but we can still remove them from the UI
+        // Storage-only candidate: there is no database row yet, so "delete"
+        // means CREATING one — already archived — that claims this resume
+        // file. It then appears in Archived Candidates like everyone else,
+        // and the file can no longer resurrect as a fresh dashboard row
+        // (Step 3.5 of the merge honours archived rows).
+        let resumeUrl = candidate.resumeUrl;
+        if (!resumeUrl) {
+          const withoutPrefix = candidate.id.replace('storage-', '');
+          let bucket = 'resumes-private';
+          let filename = withoutPrefix;
+          for (const knownBucket of STORAGE_BUCKETS) {
+            if (withoutPrefix.startsWith(knownBucket + '-')) {
+              bucket = knownBucket;
+              filename = withoutPrefix.substring(knownBucket.length + 1);
+              break;
+            }
+          }
+          resumeUrl = `${bucket}/${filename}`;
+        }
+
+        const email = candidate.email && candidate.email !== "—" ? candidate.email.toLowerCase() : null;
+
+        const { error: insertError } = await supabase
+          .from('candidates')
+          .insert({
+            full_name: candidate.name,
+            email,
+            phone: candidate.phone && candidate.phone !== "—" ? candidate.phone : null,
+            resume_url: resumeUrl,
+            status: 'Pending',
+            resume_processed: false,
+            job_id: null,
+            is_archived: true,
+          } as any);
+
+        if (insertError) {
+          // Duplicate email → a row for this person already exists; archive it
+          // and make sure it claims this resume file.
+          if ((insertError.code === '23505' || insertError.message?.includes('duplicate')) && email) {
+            const { data: existing, error: findError } = await supabase
+              .from('candidates')
+              .select('id, resume_url')
+              .eq('email', email)
+              .maybeSingle();
+            if (findError || !existing) throw insertError;
+            const { error: updateError } = await supabase
+              .from('candidates')
+              .update({
+                is_archived: true,
+                resume_url: existing.resume_url || resumeUrl,
+              } as any)
+              .eq('id', existing.id);
+            if (updateError) throw updateError;
+          } else {
+            throw insertError;
+          }
+        }
+
         queryClient.setQueryData(['all-candidates-with-storage'], (oldData: RawCandidate[] | undefined) => {
           if (!oldData) return oldData;
           return oldData.filter((c: RawCandidate) => {
@@ -1858,11 +1946,13 @@ export default function Dashboard() {
             return true;
           });
         });
+        await queryClient.invalidateQueries({ queryKey: ["all-candidates-with-storage"] });
+        await queryClient.invalidateQueries({ queryKey: ["archived-candidates"] });
 
-      toast({
-          title: "Candidate Removed",
-          description: `${candidate.name} has been removed from view. Note: Storage-only candidates may reappear on refresh.`,
-      });
+        toast({
+          title: "Candidate Archived",
+          description: `${candidate.name} has been moved to Archived Candidates.`,
+        });
       }
     } catch (error: any) {
       console.error("Error archiving candidate:", error);

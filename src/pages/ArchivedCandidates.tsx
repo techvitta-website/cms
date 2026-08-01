@@ -118,14 +118,38 @@ export default function ArchivedCandidates() {
     }
   };
 
+  // Resolve a stored resume_url to its bucket + object path so the PDF itself
+  // can be removed. Handles both "bucket/filename" values and full storage URLs.
+  const KNOWN_BUCKETS = ["resumes-private", "resumes"];
+  const parseResumeLocation = (
+    value: string | null | undefined
+  ): { bucket: string; filename: string } | null => {
+    if (!value) return null;
+    const v = value.trim();
+    const objMatch = v.match(/\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+?)(?:\?.*)?$/);
+    if (objMatch) return { bucket: objMatch[1], filename: decodeURIComponent(objMatch[2]) };
+    for (const bucket of KNOWN_BUCKETS) {
+      if (v.startsWith(bucket + "/")) return { bucket, filename: v.substring(bucket.length + 1) };
+    }
+    return null;
+  };
+
   // Permanently delete a candidate from the database. Foreign keys cascade /
-  // set-null, so their interviews, documents and letters are removed too.
+  // set-null, so their interviews, documents and letters are removed too. Their
+  // resume PDF is also removed from storage — a leftover file would otherwise
+  // reappear on the Dashboard as a fresh "storage-only" candidate.
   const handleDeletePermanently = async () => {
     if (!toDelete) return;
     setDeletingId(toDelete.id);
     try {
       const { error } = await supabase.from("candidates").delete().eq("id", toDelete.id);
       if (error) throw error;
+
+      const loc = parseResumeLocation(toDelete.resume_url);
+      if (loc) {
+        const { error: fileError } = await supabase.storage.from(loc.bucket).remove([loc.filename]);
+        if (fileError) console.warn("Could not remove resume file:", fileError.message);
+      }
 
       await queryClient.invalidateQueries();
       toast({
@@ -244,8 +268,8 @@ export default function ArchivedCandidates() {
             <DialogTitle>Delete {toDelete?.full_name} permanently?</DialogTitle>
             <DialogDescription>
               This permanently removes the candidate and all of their related records — interviews,
-              uploaded documents, and offer / experience / rejection letters — from the database.
-              This action cannot be undone.
+              uploaded documents, offer / experience / rejection letters, and their stored resume
+              file. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
