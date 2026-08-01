@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import CandidateActionsMenu from "@/components/CandidateActionsMenu";
+import CandidateJobEditor from "@/components/CandidateJobEditor";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -700,9 +701,10 @@ export default function OfferLetterGenerator({
                   <FeedbackBadge decision={c.feedback_decision} rating={c.feedback_rating} />
                   <CidBadge status={c.document_verification_status} />
                 </div>
-                <p className="text-sm text-muted-foreground truncate">
-                  {c.email}
-                  {c.jobs?.job_title ? ` · ${c.jobs.job_title}` : ""}
+                <p className="text-sm text-muted-foreground flex items-center gap-1 min-w-0">
+                  <span className="truncate">{c.email}</span>
+                  <span className="shrink-0">·</span>
+                  <CandidateJobEditor candidateId={c.id} jobTitle={c.jobs?.job_title || null} />
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">

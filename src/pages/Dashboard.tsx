@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import AIScreeningStatus from "@/components/AIScreeningStatus";
+import CandidateJobEditor from "@/components/CandidateJobEditor";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -3241,7 +3242,10 @@ export default function Dashboard() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm font-medium text-foreground">
-                        {candidate.jobApplied}
+                        <CandidateJobEditor
+                          candidateId={candidate.id}
+                          jobTitle={candidate.jobApplied === "—" ? null : candidate.jobApplied}
+                        />
                       </TableCell>
                       <TableCell>
                         <Select
