@@ -759,7 +759,7 @@ export default function InternScreening() {
                   <TableHead>CGPA</TableHead>
                   <TableHead>Score</TableHead>
                   <TableHead>Skills</TableHead>
-                  <TableHead>Source</TableHead>
+                  <TableHead>Phone</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Resume</TableHead>
                 </TableRow>
@@ -824,7 +824,7 @@ export default function InternScreening() {
                         <TableCell className="text-xs max-w-[220px]">
                           {(c.skills ?? []).slice(0, 8).join(", ") || "—"}
                         </TableCell>
-                        <TableCell className="text-xs">{c.source_portal || c.batch_tag || "—"}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{c.phone || "—"}</TableCell>
                         <TableCell>
                           <Select
                             value={status}
