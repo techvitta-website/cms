@@ -60,6 +60,7 @@ import {
 import { Label } from "@/components/ui/label";
 import AIScreeningStatus from "@/components/AIScreeningStatus";
 import CandidateJobEditor from "@/components/CandidateJobEditor";
+import ExcelColumnFilter, { applyColumnFilters } from "@/components/ExcelColumnFilter";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -1558,6 +1559,38 @@ export default function Dashboard() {
       return true;
     });
   }, [dateFilter, stageFilter, jobFilter, latestCandidates, searchTerm]);
+
+  // Excel-style per-column filters, layered on top of the toolbar filters.
+  const [columnFilters, setColumnFilters] = useState<Record<string, Set<string> | null>>({
+    name: null, job: null, stage: null, email: null, phone: null, followup: null,
+  });
+  const followupCategory = (c: CandidateRow): string =>
+    c.resumeUrl
+      ? "Has resume"
+      : !c.email || c.email === "—"
+        ? "No resume · no email"
+        : (c.resumeRequestCount ?? 0) === 0
+          ? "No resume — not requested"
+          : `Reminder ${Math.min(c.resumeRequestCount ?? 0, 3)} of 3`;
+  const columnValueOf = (c: CandidateRow, key: string): string => {
+    switch (key) {
+      case "name": return c.name || "—";
+      case "job": return c.jobApplied || "—";
+      case "stage": return formatStatus(c.status || "Pending");
+      case "email": return c.email && c.email !== "—" ? c.email : "—";
+      case "phone": return c.phone && c.phone !== "—" ? c.phone : "—";
+      case "followup": return followupCategory(c);
+      default: return "—";
+    }
+  };
+  const visibleCandidates = useMemo(
+    () => applyColumnFilters(filteredCandidates, columnFilters, columnValueOf),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredCandidates, columnFilters],
+  );
+  const columnValues = (key: string) => filteredCandidates.map((c) => columnValueOf(c, key));
+  const setColumnFilter = (key: string) => (sel: Set<string> | null) =>
+    setColumnFilters((p) => ({ ...p, [key]: sel }));
 
 
   const formatStatus = (status: string) => {
@@ -3447,24 +3480,36 @@ export default function Dashboard() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Candidate</TableHead>
-                  <TableHead>Job Applied</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead className="text-right">Phone</TableHead>
-                  <TableHead>Resume Follow-up</TableHead>
+                  <TableHead>
+                    <ExcelColumnFilter label="Candidate" values={columnValues("name")} selected={columnFilters.name} onChange={setColumnFilter("name")} />
+                  </TableHead>
+                  <TableHead>
+                    <ExcelColumnFilter label="Job Applied" values={columnValues("job")} selected={columnFilters.job} onChange={setColumnFilter("job")} />
+                  </TableHead>
+                  <TableHead>
+                    <ExcelColumnFilter label="Stage" values={columnValues("stage")} selected={columnFilters.stage} onChange={setColumnFilter("stage")} />
+                  </TableHead>
+                  <TableHead>
+                    <ExcelColumnFilter label="Email" values={columnValues("email")} selected={columnFilters.email} onChange={setColumnFilter("email")} />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <ExcelColumnFilter label="Phone" values={columnValues("phone")} selected={columnFilters.phone} onChange={setColumnFilter("phone")} />
+                  </TableHead>
+                  <TableHead>
+                    <ExcelColumnFilter label="Resume Follow-up" values={columnValues("followup")} selected={columnFilters.followup} onChange={setColumnFilter("followup")} />
+                  </TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCandidates.length === 0 ? (
+                {visibleCandidates.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                       No candidates match the current filters.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredCandidates.map((candidate) => (
+                  visibleCandidates.map((candidate) => (
                     <TableRow
                       key={candidate.id}
                       className="hover:bg-accent/50 transition-colors"
