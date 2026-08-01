@@ -4,6 +4,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
+import CandidateActionsMenu from "@/components/CandidateActionsMenu";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -526,10 +527,13 @@ export default function CertificateGenerator({
                   {c.jobs?.job_title ? ` · ${c.jobs.job_title}` : ""}
                 </p>
               </div>
-              <Button onClick={() => openFor(c)} className="shrink-0">
-                <BadgeCheck className="mr-2 h-4 w-4" />
-                Create certificate
-              </Button>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button onClick={() => openFor(c)}>
+                  <BadgeCheck className="mr-2 h-4 w-4" />
+                  Create certificate
+                </Button>
+                <CandidateActionsMenu candidateId={c.id} candidateName={c.full_name} />
+              </div>
             </div>
           ))}
         </div>
