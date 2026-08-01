@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserPlus, Pencil, KeyRound } from "lucide-react";
+import { UserPlus, Pencil, KeyRound, Trash2, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -45,6 +47,8 @@ export default function HRUsers() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [editRole, setEditRole] = useState("");
+  const [deletingUser, setDeletingUser] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -316,6 +320,44 @@ export default function HRUsers() {
     setResetPasswordOpen(true);
   };
 
+  // Delete an HR user's login access entirely (Admin only). The edge function
+  // removes both the hr_users row and the Supabase Auth account (service role),
+  // so the user can no longer sign in to this app or the SSO hub.
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-hr-user', {
+        body: { userId: deletingUser.id },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to delete user');
+      }
+
+      toast({
+        title: "User deleted",
+        description: `${deletingUser.name} has been removed and can no longer log in.`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['hr-users'] });
+      setDeletingUser(null);
+    } catch (error: any) {
+      toast({
+        title: "Delete failed",
+        description: error.message || "Failed to delete user. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const getRoleBadge = (role: string) => {
     if (role === "admin") return <Badge className="bg-primary text-primary-foreground">Admin</Badge>;
     return <Badge variant="secondary">{role || 'hr'}</Badge>;
@@ -448,6 +490,20 @@ export default function HRUsers() {
                             title="Reset Password"
                           >
                             <KeyRound className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {/* Delete Button - Admin only. Hidden on your own row so
+                            you can't lock yourself out (the edge function also
+                            blocks self-delete as a safeguard). */}
+                        {userIsAdmin && user.id !== currentUser?.id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeletingUser(user)}
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            title="Delete User"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -597,6 +653,60 @@ export default function HRUsers() {
                 </div>
               </form>
             )}
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Delete HR User Confirmation - Admin only */}
+      {userIsAdmin && (
+        <Dialog
+          open={!!deletingUser}
+          onOpenChange={(open) => !open && !deleting && setDeletingUser(null)}
+        >
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="text-xl">Delete {deletingUser?.name}?</DialogTitle>
+              <DialogDescription>
+                This permanently removes their login access. They will be deleted from this
+                app and can no longer sign in here or through the SSO hub. This action cannot
+                be undone.
+              </DialogDescription>
+            </DialogHeader>
+            {deletingUser && (
+              <div className="p-4 bg-muted rounded-lg">
+                <p className="text-lg font-semibold">{deletingUser.name}</p>
+                <p className="text-sm text-muted-foreground">{deletingUser.email}</p>
+                <Badge variant="secondary" className="mt-2">{deletingUser.role || 'hr'}</Badge>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeletingUser(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleDeleteUser}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete User
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
