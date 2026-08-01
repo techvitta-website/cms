@@ -157,6 +157,11 @@ export default function InternScreening() {
         // screening decision. Once moved to Shortlisted (or beyond) they leave
         // this page — the Dashboard is the single all-stages overview.
         .or("status.is.null,status.eq.Pending")
+        // Screening ranks RESUMES — a candidate without one can never be
+        // scored, so they don't belong in this queue. They stay visible on
+        // the Dashboard, where the Request Resume button collects their PDF;
+        // the moment it arrives they appear here automatically.
+        .not("resume_url", "is", null)
         .order("screening_score", { ascending: false, nullsFirst: false })
         .limit(2000);
       if (error) throw error;
