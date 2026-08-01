@@ -13,6 +13,10 @@ declare const Deno: {
 };
 
 const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "Techvitta Innovations Pvt Ltd <hr@cms.techvitta.in>";
+// Candidates reply to this address. It MUST be a real, receivable mailbox —
+// cms.techvitta.in has no MX records, so replies there bounce. techvitta.in is
+// hosted on GoDaddy/Titan and receives mail, so replies land in the HR inbox.
+const RESEND_REPLY_TO = Deno.env.get("RESEND_REPLY_TO") || "hr@techvitta.in";
 
 interface EmailRequest {
   to: string;
@@ -421,6 +425,8 @@ serve(async (req) => {
     const emailPayload: any = {
       from: RESEND_FROM_EMAIL,
       to: to,
+      // Send replies to the real HR mailbox, not the no-MX app subdomain.
+      reply_to: RESEND_REPLY_TO,
       subject: subject,
       html: htmlContent,
     };
