@@ -1712,6 +1712,7 @@ export default function Dashboard() {
             status: newStatus,
             resume_processed: false,
             job_id: null,
+            ...(applicationArrivalIso(candidate) ? { created_at: applicationArrivalIso(candidate) } : {}),
           })
           .select('id')
           .single();
@@ -1876,6 +1877,20 @@ export default function Dashboard() {
     }
   };
 
+  // The moment an application first reached the CMS is encoded in the resume
+  // filename's millisecond-timestamp prefix (e.g. 1785455436901_1_Name.pdf).
+  // When a storage-only candidate is materialized into a DB row later (status
+  // change / archive), created_at must be that ORIGINAL arrival time — not the
+  // save time — so "Added X ago" reflects when the application actually came in.
+  const applicationArrivalIso = (candidate: CandidateRow): string | null => {
+    const source = `${candidate.resumeUrl || ""} ${candidate.id}`;
+    const m = source.match(/(\d{13})_\d+_/);
+    if (!m) return null;
+    const t = Number(m[1]);
+    if (!Number.isFinite(t) || t < 1500000000000 || t > Date.now() + 86400000) return null;
+    return new Date(t).toISOString();
+  };
+
   // Ask a candidate (by email) to upload their missing resume. The email
   // contains a public link to /{candidateId}/upload-resume where the PDF is
   // collected and attached to their record automatically.
@@ -2027,6 +2042,7 @@ export default function Dashboard() {
             resume_processed: false,
             job_id: null,
             is_archived: true,
+            ...(applicationArrivalIso(candidate) ? { created_at: applicationArrivalIso(candidate) } : {}),
           } as any);
 
         if (insertError) {
