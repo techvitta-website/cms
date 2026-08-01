@@ -2,6 +2,13 @@
 // Allows admin users to permanently remove an HR user's login access:
 // deletes their hr_users row AND their Supabase Auth account.
 //
+// IMPORTANT: in this project hr_users.id does NOT always equal auth.users.id
+// (roles are keyed by email). So everything here keys off EMAIL:
+//   - the caller's admin status is looked up by their auth email
+//   - the target's auth account is resolved from their email via the
+//     get_auth_user_id_by_email() helper (service-role only)
+// Using the hr_users.id as an auth id would silently target the wrong account.
+//
 // The SSO hub (logins.techvitta.in) reads each app's users live by email,
 // so a deletion here automatically disappears from the SSO console — no
 // changes to the Master project / sso repo are needed.
@@ -18,122 +25,121 @@ const corsHeaders = () => ({
   "Access-Control-Max-Age": "86400",
 });
 
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders(), "Content-Type": "application/json" },
+  });
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders(),
-    });
+    return new Response("ok", { headers: corsHeaders() });
   }
 
   try {
     // Get authorization header
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Authorization header required" }),
-        {
-          status: 401,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
+      return json({ success: false, error: "Authorization header required" }, 401);
     }
 
-    // Initialize Supabase client with user's token
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
+    // Client bound to the caller's token — used only to identify the caller.
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: { Authorization: authHeader },
-      },
+      global: { headers: { Authorization: authHeader } },
     });
 
-    // Get current user
+    // Service-role client — used for all privileged reads/writes so we are not
+    // subject to RLS and can reach the auth admin API.
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // Identify the caller from their JWT.
     const {
       data: { user: currentUser },
       error: userError,
     } = await supabaseClient.auth.getUser();
 
-    if (userError || !currentUser) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Unauthorized" }),
-        {
-          status: 401,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
+    if (userError || !currentUser || !currentUser.email) {
+      return json({ success: false, error: "Unauthorized" }, 401);
     }
 
-    // Check if current user is admin
-    const { data: hrUser, error: hrError } = await supabaseClient
+    const callerEmail = currentUser.email.toLowerCase();
+
+    // Verify the caller is an admin — looked up BY EMAIL (hr_users.id may not
+    // match the auth id, so we cannot match on id here).
+    const { data: callerRows, error: callerError } = await supabaseAdmin
       .from("hr_users")
       .select("role")
-      .eq("id", currentUser.id)
-      .single();
+      .ilike("email", callerEmail)
+      .limit(1);
 
-    if (hrError || !hrUser || hrUser.role?.toLowerCase() !== "admin") {
-      return new Response(
-        JSON.stringify({ success: false, error: "Only admin users can delete HR users" }),
-        {
-          status: 403,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
+    const callerRole = callerRows?.[0]?.role;
+    if (callerError || !callerRole || callerRole.toLowerCase() !== "admin") {
+      return json({ success: false, error: "Only admin users can delete HR users" }, 403);
     }
 
-    // Parse request body
+    // Parse request body — userId is the hr_users row id sent by the client.
     const { userId } = await req.json();
-
     if (!userId) {
-      return new Response(
-        JSON.stringify({ success: false, error: "User ID is required" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
+      return json({ success: false, error: "User ID is required" }, 400);
     }
 
-    // Block self-delete — an admin removing their own login would lock
-    // themselves (and possibly everyone) out.
-    if (userId === currentUser.id) {
-      return new Response(
-        JSON.stringify({ success: false, error: "You cannot delete your own account" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // Verify target user exists
-    const { data: targetUser, error: targetError } = await supabaseClient
+    // Load the target row (by hr_users.id) to get their email.
+    const { data: targetUser, error: targetError } = await supabaseAdmin
       .from("hr_users")
-      .select("id, role")
+      .select("id, email, role")
       .eq("id", userId)
       .single();
 
-    if (targetError || !targetUser) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Target user not found" }),
-        {
-          status: 404,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
+    if (targetError || !targetUser || !targetUser.email) {
+      return json({ success: false, error: "Target user not found" }, 404);
+    }
+
+    // Block self-delete — compare by EMAIL (ids can differ from auth ids).
+    if (targetUser.email.toLowerCase() === callerEmail) {
+      return json({ success: false, error: "You cannot delete your own account" }, 400);
+    }
+
+    // Resolve the target's real auth user id from their email.
+    const { data: authUserId, error: rpcError } = await supabaseAdmin.rpc(
+      "get_auth_user_id_by_email",
+      { p_email: targetUser.email }
+    );
+
+    if (rpcError) {
+      console.error("get_auth_user_id_by_email error:", rpcError);
+      return json(
+        { success: false, error: rpcError.message || "Failed to resolve login account" },
+        500
       );
     }
 
-    // Use service role for the privileged deletes (bypasses RLS + Auth admin API)
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    // Delete the auth login FIRST so we never end up with a removed directory
+    // row while the login still works. If there is no auth account (already
+    // gone), skip straight to removing the orphaned hr_users row.
+    if (authUserId) {
+      const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(
+        authUserId as string
+      );
+      if (authDeleteError) {
+        console.error("auth deleteUser error:", authDeleteError);
+        return json(
+          {
+            success: false,
+            error: authDeleteError.message || "Failed to delete the login account.",
+          },
+          500
+        );
+      }
+    }
 
-    // 1) Remove the application row (roles / directory entry)
+    // Remove the application row (roles / directory entry).
     const { error: rowError } = await supabaseAdmin
       .from("hr_users")
       .delete()
@@ -141,57 +147,23 @@ serve(async (req) => {
 
     if (rowError) {
       console.error("hr_users delete error:", rowError);
-      return new Response(
-        JSON.stringify({ success: false, error: rowError.message || "Failed to remove HR user record" }),
+      return json(
         {
-          status: 500,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // 2) Remove the auth login itself so they can no longer sign in anywhere.
-    const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-
-    if (authDeleteError) {
-      // The directory row is already gone; report the partial failure so the
-      // admin knows the auth login may still exist and can retry.
-      console.error("auth deleteUser error:", authDeleteError);
-      return new Response(
-        JSON.stringify({
           success: false,
           error:
-            authDeleteError.message ||
-            "Removed the HR record but failed to delete the login account. Please retry.",
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        }
+            rowError.message ||
+            "Deleted the login account but failed to remove the HR record.",
+        },
+        500
       );
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: "HR user deleted successfully",
-        userId,
-      }),
-      {
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      }
-    );
+    return json({ success: true, message: "HR user deleted successfully", userId });
   } catch (error: any) {
     console.error("Unexpected error:", error);
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message || "An unexpected error occurred",
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      }
+    return json(
+      { success: false, error: error.message || "An unexpected error occurred" },
+      500
     );
   }
 });
