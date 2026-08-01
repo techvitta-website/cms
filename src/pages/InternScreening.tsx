@@ -123,7 +123,6 @@ export default function InternScreening() {
   const [query, setQuery] = useState("");
   const [batchFilter, setBatchFilter] = useState<string>("__ALL__");
   const [tierFilter, setTierFilter] = useState<string>("__ALL__");
-  const [statusFilter, setStatusFilter] = useState<string>("__ALL__");
   const [minScore, setMinScore] = useState<string>("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -154,6 +153,10 @@ export default function InternScreening() {
           "id, full_name, email, phone, status, resume_url, skills, college, degree, branch, graduation_year, cgpa, batch_tag, source_portal, screening_score, screening_tier, screening_rationale, intern_flags, resume_processed, screened_at",
         )
         .or("is_archived.is.null,is_archived.eq.false")
+        // Stage exclusivity: this queue is ONLY for candidates awaiting a
+        // screening decision. Once moved to Shortlisted (or beyond) they leave
+        // this page — the Dashboard is the single all-stages overview.
+        .or("status.is.null,status.eq.Pending")
         .order("screening_score", { ascending: false, nullsFirst: false })
         .limit(2000);
       if (error) throw error;
@@ -203,8 +206,13 @@ export default function InternScreening() {
           return false;
         }
       }
-      if (tierFilter !== "__ALL__" && (c.screening_tier || "Unscored") !== tierFilter) return false;
-      if (statusFilter !== "__ALL__" && (c.status || "Pending") !== statusFilter) return false;
+      if (tierFilter === "__FAILED__") {
+        if (!(c.intern_flags ?? []).includes("screen_failed")) return false;
+      } else if (tierFilter === "Unscored") {
+        if (c.screened_at || c.screening_score != null) return false;
+      } else if (tierFilter !== "__ALL__" && (c.screening_tier || "Unscored") !== tierFilter) {
+        return false;
+      }
       if (min != null && !Number.isNaN(min) && (c.screening_score ?? -1) < min) return false;
       if (q) {
         const hay = `${c.full_name ?? ""} ${c.email ?? ""} ${c.college ?? ""} ${c.branch ?? ""} ${(c.skills ?? []).join(" ")}`.toLowerCase();
@@ -212,7 +220,7 @@ export default function InternScreening() {
       }
       return true;
     });
-  }, [candidates, query, batchFilter, tierFilter, statusFilter, minScore]);
+  }, [candidates, query, batchFilter, tierFilter, minScore]);
 
   // Expand the selected files into a flat list of PDFs, unpacking any .zip
   // (Naukri Resdex / Internshala bulk exports often come as a ZIP of resumes).
@@ -662,9 +670,11 @@ export default function InternScreening() {
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-xl">Ranked review queue — entire database</CardTitle>
+              <CardTitle className="text-xl">Ranked review queue — awaiting screening</CardTitle>
               <p className="text-sm text-muted-foreground">
-                {filtered.length} of {candidates.length} candidate(s) in the database. Highest AI score first. Nobody is auto-rejected.
+                {filtered.length} of {candidates.length} candidate(s) awaiting a screening decision. Highest AI
+                score first; nobody is auto-rejected. Candidates you shortlist move on to the Shortlist stage —
+                the Dashboard is the all-stages overview.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -691,7 +701,7 @@ export default function InternScreening() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -725,19 +735,8 @@ export default function InternScreening() {
                 <SelectItem value="Consider">Consider</SelectItem>
                 <SelectItem value="Review">Review</SelectItem>
                 <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__ALL__">All statuses</SelectItem>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
+                <SelectItem value="Unscored">Unscored</SelectItem>
+                <SelectItem value="__FAILED__">⚠ Screening failed</SelectItem>
               </SelectContent>
             </Select>
             <Input
@@ -805,7 +804,14 @@ export default function InternScreening() {
                         </TableCell>
                         <TableCell className="text-sm">{c.cgpa ?? "—"}</TableCell>
                         <TableCell>
-                          {c.screening_score == null ? (
+                          {(c.intern_flags ?? []).includes("screen_failed") ? (
+                            <Badge
+                              className="bg-red-100 text-red-700 border-none"
+                              title="AI screening failed for this resume — use Retry failed above"
+                            >
+                              ⚠ failed
+                            </Badge>
+                          ) : c.screening_score == null ? (
                             <Badge className="bg-slate-100 text-slate-500 border-none">unscored</Badge>
                           ) : (
                             <div className="flex flex-col gap-0.5">
