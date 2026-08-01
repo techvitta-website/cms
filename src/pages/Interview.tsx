@@ -871,6 +871,22 @@ export default function Interview() {
       .sort((a, b) => new Date(a.interview_date).getTime() - new Date(b.interview_date).getTime());
   }, [interviewHistory]);
 
+  // Open the reschedule dialog for a calendar interview row, so HR can set (or
+  // change) the meeting link and re-notify the candidate.
+  const openRescheduleForInterview = (iv: any) => {
+    const cand: Candidate = {
+      id: iv.candidate_id,
+      full_name: iv.candidates?.full_name || iv.candidate_name || "Candidate",
+      email: iv.candidates?.email || "",
+      phone: iv.candidates?.phone ?? null,
+      resume_url: null,
+      status: "Interview Scheduled",
+      job_id: null,
+      jobs: iv.candidates?.jobs || null,
+    };
+    handleOpenQuick(cand, "reschedule");
+  };
+
   const renderInterviewItem = (iv: any) => {
     const dt = new Date(iv.interview_date);
     const link = extractMeetingLink(iv.notes);
@@ -897,7 +913,7 @@ export default function Interview() {
           <span className="text-xs text-muted-foreground">Panel: {iv.interview_panel}</span>
         )}
         {email && <span className="text-xs text-muted-foreground hidden sm:inline">{email}</span>}
-        {link && (
+        {link ? (
           <Button
             variant="outline"
             size="sm"
@@ -907,7 +923,20 @@ export default function Interview() {
             <Video className="h-3.5 w-3.5 mr-1" />
             Join
           </Button>
-        )}
+        ) : iv.interview_mode !== "Offline" ? (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-amber-700">No meeting link</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7"
+              onClick={() => openRescheduleForInterview(iv)}
+            >
+              <Video className="h-3.5 w-3.5 mr-1" />
+              Add link
+            </Button>
+          </div>
+        ) : null}
       </div>
     );
   };
