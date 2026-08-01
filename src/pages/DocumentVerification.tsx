@@ -86,40 +86,13 @@ export default function DocumentVerification() {
   const [rejectFeedback, setRejectFeedback] = useState("");
   const [documentToReject, setDocumentToReject] = useState<{ docId: string; docType: string } | null>(null);
 
-  // Fetch candidates for CID Verification:
-  // 1. Candidates with feedback_decision = "Approve" 
-  // 2. Candidates with status = "Interview Scheduled" (for testing)
+  // CID verification is a post-approval step ("before sending offer letters"),
+  // so only candidates approved in feedback (feedback_decision = 'Approve') or
+  // with the canonical status 'Approved' are eligible.
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["approved-candidates-documents"],
     queryFn: async () => {
-      // Fetch approved candidates
-      const { data: approvedData, error: approvedError } = await supabase
-        .from("candidates")
-        .select(`
-          id,
-          full_name,
-          email,
-          phone,
-          resume_url,
-          status,
-          job_id,
-          feedback_rating,
-          feedback_notes,
-          feedback_decision,
-          feedback_submitted_at,
-          document_verification_status,
-          jobs (
-            job_title,
-            department
-          )
-        `)
-        .eq("feedback_decision", "Approve")
-        .not("feedback_decision", "is", null);
-
-      if (approvedError) throw approvedError;
-
-      // Fetch Interview Scheduled candidates (for testing)
-      const { data: interviewScheduledData, error: interviewError } = await supabase
+      const { data, error } = await supabase
         .from("candidates")
         .select(`
           id,
@@ -140,21 +113,11 @@ export default function DocumentVerification() {
             department
           )
         `)
-        .eq("status", "Interview Scheduled");
+        .or("feedback_decision.eq.Approve,status.eq.Approved")
+        .order("created_at", { ascending: false });
 
-      if (interviewError) throw interviewError;
-
-      // Combine and deduplicate by ID
-      const allCandidates = [...(approvedData || []), ...(interviewScheduledData || [])];
-      const uniqueCandidates = Array.from(
-        new Map(allCandidates.map(c => [c.id, c])).values()
-      );
-
-      return uniqueCandidates.sort((a: any, b: any) => {
-        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return dateB - dateA;
-      }) as unknown as Candidate[];
+      if (error) throw error;
+      return (data ?? []) as unknown as Candidate[];
     },
     refetchInterval: 10000, // Refresh every 10 seconds to catch status updates
   });
@@ -196,8 +159,7 @@ export default function DocumentVerification() {
       const { data: candidatesData, error: candidatesError } = await supabase
         .from("candidates")
         .select("id, email")
-        .eq("feedback_decision", "Approve")
-        .not("feedback_decision", "is", null);
+        .or("feedback_decision.eq.Approve,status.eq.Approved");
 
       if (candidatesError) throw candidatesError;
       
@@ -1241,6 +1203,32 @@ export default function DocumentVerification() {
             </div>
           ) : (
             <div className="space-y-4">
+              {candidateDocuments.some((d) => d.verification_status === "pending") && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/40 p-3">
+                  <p className="text-sm text-muted-foreground">
+                    {candidateDocuments.filter((d) => d.verification_status === "pending").length} pending —
+                    verify all at once, or review each below.
+                  </p>
+                  <Button
+                    size="sm"
+                    onClick={handleVerifyAllDocuments}
+                    disabled={verifyingDocId !== null || rejectingDocId !== null}
+                    className="bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+                  >
+                    {verifyingDocId === "all" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Verify All
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
               {candidateDocuments.map((doc) => {
                 const docTypeInfo = DOCUMENT_TYPES.find(d => d.id === doc.document_type);
                 const getStatusBadge = () => {
