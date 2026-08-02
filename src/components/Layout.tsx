@@ -36,7 +36,9 @@ export default function Layout({ children }: LayoutProps) {
       {/* Mobile sidebar overlay */}
       {isMobile && isSidebarOpen && (
         <div className="fixed inset-0 z-40 flex md:hidden">
-          <div className="w-72 max-w-[80vw] border-r border-border shadow-lg pt-16 bg-gradient-to-b from-card to-muted/40">
+          {/* Solid background — the translucent gradient let the page bleed
+              through the drawer, making the menu unreadable on mobile. */}
+          <div className="w-72 max-w-[80vw] border-r border-border shadow-xl pt-16 bg-background">
             <nav className="flex flex-col gap-5 p-4 overflow-y-auto h-full">
               {sections.map((section) => (
                 <div key={section.title} className="flex flex-col gap-1">
