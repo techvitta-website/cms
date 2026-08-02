@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { BadgeCheck, Download, Eye, Loader2, Search, Send } from "lucide-react";
+import { BadgeCheck, Download, Eye, Loader2, Search, Send, Phone } from "lucide-react";
 import letterheadUrl from "@/assets/certificate/letterhead.png";
 import signatureUrl from "@/assets/certificate/signature.png";
 
@@ -527,6 +527,17 @@ export default function CertificateGenerator({
                   <span className="truncate">{c.email}</span>
                   <span className="shrink-0">·</span>
                   <CandidateJobEditor candidateId={c.id} jobTitle={c.jobs?.job_title || null} />
+                  {c.phone && (
+                    <a
+                      href={`tel:${c.phone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex shrink-0 items-center gap-1 text-muted-foreground hover:text-foreground"
+                      title={`Call ${c.full_name}`}
+                    >
+                      <Phone className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">{c.phone}</span>
+                    </a>
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
