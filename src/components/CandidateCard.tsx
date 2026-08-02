@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,22 @@ export default function CandidateCard({
               jobTitle={appliedJob}
               className="sm:w-[170px] shrink-0"
             />
+            {/* Mobile number — HR confirms stages by phone, so it's tap-to-call. */}
+            {phone ? (
+              <a
+                href={`tel:${phone}`}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 text-xs sm:text-sm text-muted-foreground hover:text-foreground sm:w-[140px] shrink-0 min-w-0"
+                title={`Call ${fullName}`}
+              >
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{phone}</span>
+              </a>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs sm:text-sm text-muted-foreground/50 sm:w-[140px] shrink-0">
+                <Phone className="h-3.5 w-3.5 shrink-0" />—
+              </span>
+            )}
             <span className="sm:w-[130px] shrink-0">{getStatusBadge(status)}</span>
             {resumeUrl && (
               <Button
