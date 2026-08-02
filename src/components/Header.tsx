@@ -1,4 +1,4 @@
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
@@ -7,9 +7,11 @@ import { getRoleDisplayName } from "@/lib/roles";
 
 interface HeaderProps {
   onMenuClick?: () => void;
+  /** Whether the mobile nav drawer is open — swaps the hamburger to an X. */
+  isMenuOpen?: boolean;
 }
 
-export default function Header({ onMenuClick }: HeaderProps) {
+export default function Header({ onMenuClick, isMenuOpen = false }: HeaderProps) {
   const { hrUser, logout, loading } = useAuth();
   const isMobile = useIsMobile();
 
@@ -23,10 +25,15 @@ export default function Header({ onMenuClick }: HeaderProps) {
           {/* Mobile hamburger */}
           <button
             type="button"
-            className="inline-flex items-center justify-center mr-1 h-9 w-9 rounded-md border border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground md:hidden"
+            aria-expanded={isMenuOpen}
+            className={`inline-flex items-center justify-center mr-1 h-10 w-10 rounded-xl border transition-all duration-200 active:scale-95 md:hidden ${
+              isMenuOpen
+                ? "border-primary/40 bg-primary/10 text-primary shadow-sm"
+                : "border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground"
+            }`}
             onClick={onMenuClick}
           >
-            <Menu className="h-5 w-5" />
+            {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             <span className="sr-only">Toggle navigation</span>
           </button>
           <img

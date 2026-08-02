@@ -28,7 +28,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen w-full bg-background">
-      <Header onMenuClick={handleToggleSidebar} />
+      <Header onMenuClick={handleToggleSidebar} isMenuOpen={isMobile && isSidebarOpen} />
 
       {/* Desktop sidebar (fixed, wide layout) */}
       <Sidebar />
@@ -38,7 +38,7 @@ export default function Layout({ children }: LayoutProps) {
         <div className="fixed inset-0 z-40 flex md:hidden">
           {/* Solid background — the translucent gradient let the page bleed
               through the drawer, making the menu unreadable on mobile. */}
-          <div className="w-72 max-w-[80vw] border-r border-border shadow-xl pt-16 bg-background">
+          <div className="w-72 max-w-[80vw] border-r border-border shadow-xl pt-16 bg-background animate-in slide-in-from-left duration-200">
             <nav className="flex flex-col gap-5 p-4 overflow-y-auto h-full">
               {sections.map((section) => (
                 <div key={section.title} className="flex flex-col gap-1">
