@@ -29,6 +29,7 @@ import CandidateFilterBar, {
   statusOptionsFrom,
   type CandidateSort,
 } from "@/components/CandidateFilterBar";
+import ExcelColumnFilter, { applyColumnFilters } from "@/components/ExcelColumnFilter";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
@@ -107,6 +108,17 @@ export default function Feedback() {
   const [activeTab, setActiveTab] = useState("pending");
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
   const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
+  // Excel column filters — one set for the pending tab, one for history.
+  const [colFilters, setColFilters] = useState<Record<string, Set<string> | null>>({
+    job: null,
+    phone: null,
+  });
+  const [histColFilters, setHistColFilters] = useState<Record<string, Set<string> | null>>({
+    job: null,
+    status: null,
+    decision: null,
+    phone: null,
+  });
 
   // Fetch candidates who have interview scheduled
   const { data: candidates = [], isLoading } = useQuery({
@@ -567,20 +579,49 @@ export default function Feedback() {
     [feedbackHistory],
   );
 
-  // Filter + sort pending candidates (search term, job, status, sort).
-  const filteredCandidates = useMemo(
-    () =>
-      filterAndSortCandidates(candidates, {
-        searchTerm,
-        jobFilter,
-        statusFilter,
-        sort,
-      }),
-    [candidates, searchTerm, jobFilter, statusFilter, sort],
+  // Distinct values for Excel column filters (pending tab).
+  const colJobValues = useMemo(() => candidates.map((c) => c.jobs?.job_title || "—"), [candidates]);
+  const colPhoneValues = useMemo(
+    () => candidates.map((c) => (c.phone ? "Has phone" : "No phone")),
+    [candidates],
   );
 
+  // Distinct values for Excel column filters (history tab).
+  const histColJobValues = useMemo(
+    () => feedbackHistory.map((c) => c.jobs?.job_title || "—"),
+    [feedbackHistory],
+  );
+  const histColStatusValues = useMemo(
+    () => feedbackHistory.map((c) => c.status || "—"),
+    [feedbackHistory],
+  );
+  const histColDecisionValues = useMemo(
+    () => feedbackHistory.map((c) => c.feedback_decision || "—"),
+    [feedbackHistory],
+  );
+  const histColPhoneValues = useMemo(
+    () => feedbackHistory.map((c) => (c.phone ? "Has phone" : "No phone")),
+    [feedbackHistory],
+  );
+
+  // Filter + sort pending candidates (search term, job, status, sort),
+  // then apply Excel column filters.
+  const filteredCandidates = useMemo(() => {
+    const base = filterAndSortCandidates(candidates, {
+      searchTerm,
+      jobFilter,
+      statusFilter,
+      sort,
+    });
+    return applyColumnFilters(base, colFilters, (c, k) => {
+      if (k === "job") return c.jobs?.job_title || "—";
+      if (k === "phone") return c.phone ? "Has phone" : "No phone";
+      return "—";
+    });
+  }, [candidates, searchTerm, jobFilter, statusFilter, sort, colFilters]);
+
   // Filter + sort feedback history (also matches on feedback notes; sorts by
-  // the date feedback was submitted).
+  // the date feedback was submitted), then apply Excel column filters.
   const filteredFeedbackHistory = useMemo(() => {
     const base = filterAndSortCandidates(feedbackHistory, {
       searchTerm: "",
@@ -589,17 +630,26 @@ export default function Feedback() {
       sort: historySort,
       dateField: (c) => c.feedback_submitted_at,
     });
-    if (!historySearchTerm.trim()) return base;
-    const searchLower = historySearchTerm.toLowerCase();
-    return base.filter((candidate) => {
-      const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
-      const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
-      const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
-      const jobMatch = candidate.jobs?.job_title?.toLowerCase().includes(searchLower);
-      const feedbackMatch = candidate.feedback_notes?.toLowerCase().includes(searchLower);
-      return nameMatch || emailMatch || phoneMatch || jobMatch || feedbackMatch;
+    let searched = base;
+    if (historySearchTerm.trim()) {
+      const searchLower = historySearchTerm.toLowerCase();
+      searched = base.filter((candidate) => {
+        const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
+        const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
+        const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
+        const jobMatch = candidate.jobs?.job_title?.toLowerCase().includes(searchLower);
+        const feedbackMatch = candidate.feedback_notes?.toLowerCase().includes(searchLower);
+        return nameMatch || emailMatch || phoneMatch || jobMatch || feedbackMatch;
+      });
+    }
+    return applyColumnFilters(searched, histColFilters, (c, k) => {
+      if (k === "job") return c.jobs?.job_title || "—";
+      if (k === "status") return c.status || "—";
+      if (k === "decision") return c.feedback_decision || "—";
+      if (k === "phone") return c.phone ? "Has phone" : "No phone";
+      return "—";
     });
-  }, [feedbackHistory, historySearchTerm, historyJobFilter, historyStatusFilter, historySort]);
+  }, [feedbackHistory, historySearchTerm, historyJobFilter, historyStatusFilter, historySort, histColFilters]);
 
   if (isLoading) {
     return (
@@ -658,6 +708,20 @@ export default function Feedback() {
             sort={sort}
             onSortChange={setSort}
           />
+          {/* Excel-style column filters */}
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">
+            <span className="font-medium text-foreground">Column filters:</span>
+            <ExcelColumnFilter label="Job" values={colJobValues} selected={colFilters.job} onChange={(s) => setColFilters((f) => ({ ...f, job: s }))} />
+            <ExcelColumnFilter label="Phone" values={colPhoneValues} selected={colFilters.phone} onChange={(s) => setColFilters((f) => ({ ...f, phone: s }))} />
+            {Object.values(colFilters).some(Boolean) && (
+              <button
+                className="ml-auto text-primary hover:underline text-xs"
+                onClick={() => setColFilters({ job: null, phone: null })}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
         </div>
 
         {filteredCandidates.length === 0 ? (
@@ -827,6 +891,22 @@ export default function Feedback() {
             sort={historySort}
             onSortChange={setHistorySort}
           />
+          {/* Excel-style column filters for history */}
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">
+            <span className="font-medium text-foreground">Column filters:</span>
+            <ExcelColumnFilter label="Job" values={histColJobValues} selected={histColFilters.job} onChange={(s) => setHistColFilters((f) => ({ ...f, job: s }))} />
+            <ExcelColumnFilter label="Status" values={histColStatusValues} selected={histColFilters.status} onChange={(s) => setHistColFilters((f) => ({ ...f, status: s }))} />
+            <ExcelColumnFilter label="Decision" values={histColDecisionValues} selected={histColFilters.decision} onChange={(s) => setHistColFilters((f) => ({ ...f, decision: s }))} />
+            <ExcelColumnFilter label="Phone" values={histColPhoneValues} selected={histColFilters.phone} onChange={(s) => setHistColFilters((f) => ({ ...f, phone: s }))} />
+            {Object.values(histColFilters).some(Boolean) && (
+              <button
+                className="ml-auto text-primary hover:underline text-xs"
+                onClick={() => setHistColFilters({ job: null, status: null, decision: null, phone: null })}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
         </div>
 
         {isHistoryLoading ? (

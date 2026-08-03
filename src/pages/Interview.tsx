@@ -36,6 +36,7 @@ import CandidateFilterBar, {
   jobOptionsFrom,
   type CandidateSort,
 } from "@/components/CandidateFilterBar";
+import ExcelColumnFilter, { applyColumnFilters } from "@/components/ExcelColumnFilter";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -152,6 +153,11 @@ export default function Interview() {
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
   const [stageView, setStageView] = useState<"awaiting" | "scheduled" | "all">("awaiting");
   const [calendarSelected, setCalendarSelected] = useState<Date>(() => startOfDay(new Date()));
+  const [colFilters, setColFilters] = useState<Record<string, Set<string> | null>>({
+    job: null,
+    status: null,
+    phone: null,
+  });
 
   // Fetch only candidates whose interview is scheduled (clean stage split — a
   // shortlisted candidate lives on the Shortlist page until they are advanced
@@ -523,16 +529,35 @@ export default function Interview() {
   // Job options for the filter dropdown, derived from the loaded candidates.
   const jobOptions = useMemo(() => jobOptionsFrom(candidates), [candidates]);
 
-  // Filter + sort candidates (search term, job filter, chosen sort order).
-  const filteredCandidates = useMemo(
-    () =>
-      filterAndSortCandidates(candidates, {
-        searchTerm,
-        jobFilter,
-        sort,
-      }),
-    [candidates, searchTerm, jobFilter, sort],
+  // Distinct values for Excel column filters.
+  const colJobValues = useMemo(
+    () => candidates.map((c) => c.jobs?.job_title || "—"),
+    [candidates],
   );
+  const colStatusValues = useMemo(
+    () => candidates.map((c) => c.status || "—"),
+    [candidates],
+  );
+  const colPhoneValues = useMemo(
+    () => candidates.map((c) => (c.phone ? "Has phone" : "No phone")),
+    [candidates],
+  );
+
+  // Filter + sort candidates (search term, job filter, chosen sort order),
+  // then apply Excel column filters on top.
+  const filteredCandidates = useMemo(() => {
+    const base = filterAndSortCandidates(candidates, {
+      searchTerm,
+      jobFilter,
+      sort,
+    });
+    return applyColumnFilters(base, colFilters, (c, k) => {
+      if (k === "job") return c.jobs?.job_title || "—";
+      if (k === "status") return c.status || "—";
+      if (k === "phone") return c.phone ? "Has phone" : "No phone";
+      return "—";
+    });
+  }, [candidates, searchTerm, jobFilter, sort, colFilters]);
 
   // Slots already booked (future interviews) so quick-schedule doesn't collide.
   const takenSlots = useMemo(() => {
@@ -997,6 +1022,21 @@ export default function Interview() {
           sort={sort}
           onSortChange={setSort}
         />
+        {/* Excel-style column filters */}
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">
+          <span className="font-medium text-foreground">Column filters:</span>
+          <ExcelColumnFilter label="Job" values={colJobValues} selected={colFilters.job} onChange={(s) => setColFilters((f) => ({ ...f, job: s }))} />
+          <ExcelColumnFilter label="Status" values={colStatusValues} selected={colFilters.status} onChange={(s) => setColFilters((f) => ({ ...f, status: s }))} />
+          <ExcelColumnFilter label="Phone" values={colPhoneValues} selected={colFilters.phone} onChange={(s) => setColFilters((f) => ({ ...f, phone: s }))} />
+          {Object.values(colFilters).some(Boolean) && (
+            <button
+              className="ml-auto text-primary hover:underline text-xs"
+              onClick={() => setColFilters({ job: null, status: null, phone: null })}
+            >
+              Clear all
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Differentiate the two groups: awaiting scheduling vs already scheduled */}

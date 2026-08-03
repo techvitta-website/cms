@@ -22,6 +22,7 @@ import CandidateFilterBar, {
   statusOptionsFrom,
   type CandidateSort,
 } from "@/components/CandidateFilterBar";
+import ExcelColumnFilter, { applyColumnFilters } from "@/components/ExcelColumnFilter";
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,11 @@ export default function Shortlist() {
   const [sentEmailIds, setSentEmailIds] = useState<string[]>([]);
   const [repliesDialogOpen, setRepliesDialogOpen] = useState(false);
   const [selectedCandidateForReplies, setSelectedCandidateForReplies] = useState<Candidate | null>(null);
+  const [colFilters, setColFilters] = useState<Record<string, Set<string> | null>>({
+    job: null,
+    status: null,
+    phone: null,
+  });
 
   // Fetch candidates with job information
   const { data: candidates = [], isLoading } = useQuery({
@@ -510,17 +516,36 @@ export default function Shortlist() {
   const jobOptions = useMemo(() => jobOptionsFrom(candidates), [candidates]);
   const statusOptions = useMemo(() => statusOptionsFrom(candidates), [candidates]);
 
-  // Filter + sort candidates (search term, job filter, status filter, sort).
-  const filteredCandidates = useMemo(
-    () =>
-      filterAndSortCandidates(candidates, {
-        searchTerm,
-        jobFilter,
-        statusFilter,
-        sort,
-      }),
-    [candidates, searchTerm, jobFilter, statusFilter, sort],
+  // Distinct values for Excel column filters (derived from all candidates).
+  const colJobValues = useMemo(
+    () => candidates.map((c) => c.jobs?.job_title || "—"),
+    [candidates],
   );
+  const colStatusValues = useMemo(
+    () => candidates.map((c) => c.status || "—"),
+    [candidates],
+  );
+  const colPhoneValues = useMemo(
+    () => candidates.map((c) => (c.phone ? "Has phone" : "No phone")),
+    [candidates],
+  );
+
+  // Filter + sort candidates (search term, job filter, status filter, sort),
+  // then apply Excel column filters on top.
+  const filteredCandidates = useMemo(() => {
+    const base = filterAndSortCandidates(candidates, {
+      searchTerm,
+      jobFilter,
+      statusFilter,
+      sort,
+    });
+    return applyColumnFilters(base, colFilters, (c, k) => {
+      if (k === "job") return c.jobs?.job_title || "—";
+      if (k === "status") return c.status || "—";
+      if (k === "phone") return c.phone ? "Has phone" : "No phone";
+      return "—";
+    });
+  }, [candidates, searchTerm, jobFilter, statusFilter, sort, colFilters]);
 
   if (isLoading) {
     return (
@@ -583,6 +608,21 @@ export default function Shortlist() {
           sort={sort}
           onSortChange={setSort}
         />
+        {/* Excel-style column filters */}
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">
+          <span className="font-medium text-foreground">Column filters:</span>
+          <ExcelColumnFilter label="Job" values={colJobValues} selected={colFilters.job} onChange={(s) => setColFilters((f) => ({ ...f, job: s }))} />
+          <ExcelColumnFilter label="Status" values={colStatusValues} selected={colFilters.status} onChange={(s) => setColFilters((f) => ({ ...f, status: s }))} />
+          <ExcelColumnFilter label="Phone" values={colPhoneValues} selected={colFilters.phone} onChange={(s) => setColFilters((f) => ({ ...f, phone: s }))} />
+          {Object.values(colFilters).some(Boolean) && (
+            <button
+              className="ml-auto text-primary hover:underline text-xs"
+              onClick={() => setColFilters({ job: null, status: null, phone: null })}
+            >
+              Clear all
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-3 sm:gap-4">
