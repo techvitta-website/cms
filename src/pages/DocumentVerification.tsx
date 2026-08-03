@@ -24,13 +24,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const COMPANY_NAME = "Techvitta Innovations Pvt Ltd";
 
-// Document types matching the email template
+// Document types matching the candidate upload portal
 const DOCUMENT_TYPES = [
-  { id: 'educational_credentials', label: 'Educational Credentials 10th to Highest', required: true },
-  { id: 'resume_copy', label: 'Latest resume copy. (Updated) with local address.', required: true },
-  { id: 'id_proof', label: 'ID proof (Aadhar Card & PAN Card) For KYC', required: true },
+  { id: 'sslc_certificate', label: '10th Certificate (SSLC / Matriculation)', required: true },
+  { id: 'plus_one_certificate', label: '+1 Certificate (11th Grade)', required: true },
+  { id: 'plus_two_certificate', label: '+2 Certificate (12th Grade / Intermediate)', required: true },
+  { id: 'ug_grade_sheets', label: 'UG Grade Sheets (Undergraduate Transcripts)', required: true },
+  { id: 'pg_grade_sheets', label: 'PG Grade Sheets (Postgraduate Transcripts)', required: false },
+  { id: 'resume_copy', label: 'Latest Resume Copy (Updated with local address)', required: true },
+  { id: 'id_proof', label: 'ID Proof (Aadhar Card & PAN Card) For KYC', required: true },
+  { id: 'resignation_letter', label: 'Resignation Letter (If currently employed)', required: false },
   { id: 'professional_certificates', label: 'Professional / Course Certificates (If Any)', required: false },
-  { id: 'previous_employment', label: 'Previously offer letters & Relieving letters, internship certificates (If Any)', required: false },
+  { id: 'previous_employment', label: 'Previous Offer Letters & Relieving Letters / Internship Certificates (If Any)', required: false },
 ];
 
 interface Candidate {
@@ -286,9 +291,9 @@ export default function DocumentVerification() {
         // Filter each document type
         Object.keys(docsByType).forEach((docType) => {
           const docs = docsByType[docType];
-          const docConfig = DOCUMENT_TYPES.find((d) => d.id === docType);
-          const allowMultiple = docConfig && docConfig.id === 'educational_credentials'; // Educational credentials allows multiple
-          
+          // No document type allows multiple uploads anymore — each credential is its own slot
+          const allowMultiple = false;
+
           if (docType === "id_proof") {
             // For ID proof, handle aadhar and pan separately (both are single-upload)
             const aadharDocs = docs.filter((d) => 
@@ -453,10 +458,9 @@ export default function DocumentVerification() {
       const updatedDocs = candidateDocuments.map(doc =>
         doc.verification_status !== 'verified' ? { ...doc, verification_status: 'verified' } : doc
       );
-      const allRequiredDocs = updatedDocs.filter(doc => 
-        ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
-      );
-      const allRequiredVerified = allRequiredDocs.length > 0 && 
+      const requiredDocIds = ['sslc_certificate', 'plus_one_certificate', 'plus_two_certificate', 'ug_grade_sheets', 'resume_copy', 'id_proof'];
+      const allRequiredDocs = updatedDocs.filter(doc => requiredDocIds.includes(doc.document_type));
+      const allRequiredVerified = allRequiredDocs.length > 0 &&
         allRequiredDocs.every(doc => doc.verification_status === 'verified');
 
       if (allRequiredVerified) {
@@ -465,7 +469,7 @@ export default function DocumentVerification() {
           .from('candidates')
           .update({ document_verification_status: 'verified' })
           .eq('id', selectedCandidate.id);
-        
+
         queryClient.invalidateQueries({ queryKey: ["approved-candidates-documents"] });
         queryClient.invalidateQueries({ queryKey: ["candidate-document-counts"] });
       }
@@ -589,10 +593,9 @@ export default function DocumentVerification() {
       const updatedDocs = candidateDocuments.map(doc =>
         doc.id === docId ? { ...doc, verification_status: 'verified' } : doc
       );
-      const allRequiredDocs = updatedDocs.filter(doc => 
-        ['educational_credentials', 'resume_copy', 'id_proof'].includes(doc.document_type)
-      );
-      const allRequiredVerified = allRequiredDocs.length > 0 && 
+      const requiredDocIds2 = ['sslc_certificate', 'plus_one_certificate', 'plus_two_certificate', 'ug_grade_sheets', 'resume_copy', 'id_proof'];
+      const allRequiredDocs = updatedDocs.filter(doc => requiredDocIds2.includes(doc.document_type));
+      const allRequiredVerified = allRequiredDocs.length > 0 &&
         allRequiredDocs.every(doc => doc.verification_status === 'verified');
 
       if (allRequiredVerified) {
@@ -838,11 +841,16 @@ export default function DocumentVerification() {
               day: "numeric" 
             }),
             requiredDocuments: [
-              "Educational Credentials 10th to Highest",
-              "Latest resume copy. (Updated) with local address.",
-              "ID proof (Aadhar Card & PAN Card) For KYC",
+              "10th Certificate (SSLC / Matriculation)",
+              "+1 Certificate (11th Grade)",
+              "+2 Certificate (12th Grade / Intermediate)",
+              "UG Grade Sheets (Undergraduate Transcripts)",
+              "PG Grade Sheets (Postgraduate Transcripts) — if applicable",
+              "Latest Resume Copy (Updated with local address)",
+              "ID Proof (Aadhar Card & PAN Card) For KYC",
+              "Resignation Letter (If currently employed)",
               "Professional / Course Certificates (If Any)",
-              "Previously offer letters & Relieving letters, internship certificates (If Any)",
+              "Previous Offer Letters & Relieving Letters / Internship Certificates (If Any)",
             ],
           },
         },
@@ -1239,11 +1247,16 @@ export default function DocumentVerification() {
                   </div>
                   <p className="text-sm font-medium mb-2">Required Documents:</p>
                   <ul className="mt-2 text-sm text-muted-foreground list-disc list-inside space-y-1">
-                    <li>Educational Credentials 10th to Highest</li>
-                    <li>Latest resume copy. (Updated) with local address.</li>
-                    <li>ID proof (Aadhar Card & PAN Card) For KYC</li>
+                    <li>10th Certificate (SSLC / Matriculation) *</li>
+                    <li>+1 Certificate (11th Grade) *</li>
+                    <li>+2 Certificate (12th Grade / Intermediate) *</li>
+                    <li>UG Grade Sheets (Undergraduate Transcripts) *</li>
+                    <li>PG Grade Sheets (Postgraduate Transcripts)</li>
+                    <li>Latest Resume Copy (Updated with local address) *</li>
+                    <li>ID Proof (Aadhar Card &amp; PAN Card) For KYC *</li>
+                    <li>Resignation Letter (If currently employed)</li>
                     <li>Professional / Course Certificates (If Any)</li>
-                    <li>Previously offer letters & Relieving letters, internship certificates (If Any)</li>
+                    <li>Previous Offer Letters &amp; Relieving Letters / Internship Certs (If Any)</li>
                   </ul>
                   <p className="text-sm text-muted-foreground mt-3">
                     The candidate will receive an email with their unique upload link and Candidate ID.

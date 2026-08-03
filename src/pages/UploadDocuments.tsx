@@ -35,9 +35,14 @@ const anonSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 type DocumentTypeId =
-  | "educational_credentials"
+  | "sslc_certificate"
+  | "plus_one_certificate"
+  | "plus_two_certificate"
+  | "ug_grade_sheets"
+  | "pg_grade_sheets"
   | "resume_copy"
   | "id_proof"
+  | "resignation_letter"
   | "professional_certificates"
   | "previous_employment";
 
@@ -61,29 +66,64 @@ type DocumentConfig =
     helperText?: string;
   };
 
-// Document types matching the requirements
+// Document types — each educational credential is its own single-upload slot
 const DOCUMENT_TYPES: DocumentConfig[] = [
   {
-    id: "educational_credentials",
-    label: "Educational Credentials 10th to Highest",
+    id: "sslc_certificate",
+    label: "10th Certificate (SSLC / Matriculation)",
     required: true,
-    allowMultiple: true,
-    helperText: "Upload 10th, 12th/Diploma, Degree, and any other mark sheets/certificates you have.",
+    allowMultiple: false,
+    helperText: "Upload your 10th standard mark sheet / certificate (PDF).",
+  },
+  {
+    id: "plus_one_certificate",
+    label: "+1 Certificate (11th Grade)",
+    required: true,
+    allowMultiple: false,
+    helperText: "Upload your 11th grade mark sheet / certificate (PDF).",
+  },
+  {
+    id: "plus_two_certificate",
+    label: "+2 Certificate (12th Grade / Intermediate)",
+    required: true,
+    allowMultiple: false,
+    helperText: "Upload your 12th grade / Intermediate mark sheet or certificate (PDF).",
+  },
+  {
+    id: "ug_grade_sheets",
+    label: "UG Grade Sheets (Undergraduate Transcripts)",
+    required: true,
+    allowMultiple: false,
+    helperText: "Upload your undergraduate consolidated mark sheet or all semester grade sheets (PDF).",
+  },
+  {
+    id: "pg_grade_sheets",
+    label: "PG Grade Sheets (Postgraduate Transcripts)",
+    required: false,
+    allowMultiple: false,
+    helperText: "Upload your postgraduate mark sheets or transcripts, if applicable (PDF).",
   },
   {
     id: "resume_copy",
-    label: "Latest resume copy. (Updated) with local address.",
+    label: "Latest Resume Copy (Updated with local address)",
     required: true,
     allowMultiple: false,
   },
   {
     id: "id_proof",
-    label: "ID proof (Aadhar Card & PAN Card) For KYC",
+    label: "ID Proof (Aadhar Card & PAN Card) For KYC",
     required: true,
     fields: [
       { key: "aadhar", label: "Aadhar Card", required: true },
       { key: "pan", label: "PAN Card", required: true },
     ],
+  },
+  {
+    id: "resignation_letter",
+    label: "Resignation Letter (If currently employed)",
+    required: false,
+    allowMultiple: false,
+    helperText: "Upload your resignation letter from your current employer, if applicable (PDF).",
   },
   {
     id: "professional_certificates",
@@ -93,7 +133,7 @@ const DOCUMENT_TYPES: DocumentConfig[] = [
   },
   {
     id: "previous_employment",
-    label: "Previously offer letters & Relieving letters, internship certificates (If Any)",
+    label: "Previous Offer Letters & Relieving Letters / Internship Certificates (If Any)",
     required: false,
     allowMultiple: false,
   },
