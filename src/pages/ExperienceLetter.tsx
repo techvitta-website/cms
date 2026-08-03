@@ -45,6 +45,8 @@ interface Candidate {
   internship_start?: string | null;
   internship_end?: string | null;
   offer_position?: string | null;
+  // true once the offer's end_date is today or earlier (internship period done).
+  internship_completed?: boolean;
   jobs?: {
     job_title: string;
     department: string | null;
@@ -92,12 +94,15 @@ export default function ExperienceLetter() {
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
   const [activeTab, setActiveTab] = useState("generate");
   const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [scope, setScope] = useState<"all" | "completed">("all");
 
-  // An experience letter is issued at the END of an internship — so eligibility
-  // is NOT the interview feedback decision. A candidate is eligible only when:
+  // Every candidate who has been ISSUED AN OFFER LETTER appears here, so HR can
+  // see the full cohort in one place. A candidate is listed when:
   //   1. an offer was issued (a row exists in offer-letters), AND
-  //   2. the internship closing date (offer end_date) is today or earlier, AND
-  //   3. they do not already have an experience letter (one per candidate).
+  //   2. they do not already have an experience letter (one per candidate).
+  // The internship closing date no longer gates the list — instead each row is
+  // tagged Completed / Ongoing, and the scope toggle above filters to the
+  // completed set when HR only wants candidates who are actually due a letter.
   // The internship dates from the offer are attached so the certificate
   // pre-fills with the exact offer period.
   const { data: candidates = [], isLoading } = useQuery({
@@ -105,15 +110,14 @@ export default function ExperienceLetter() {
     queryFn: async () => {
       const today = format(new Date(), "yyyy-MM-dd");
 
-      // 1. Offers whose internship closing date has passed (offer issued + closed).
+      // 1. All issued offers, newest closing date first.
       const { data: offers, error: offersError } = await (supabase.from("offer-letters") as any)
         .select("candidate_id, position, start_date, end_date")
         .not("candidate_id", "is", null)
-        .lte("end_date", today)
-        .order("end_date", { ascending: false });
+        .order("end_date", { ascending: false, nullsFirst: false });
       if (offersError) throw offersError;
 
-      // Latest passed offer per candidate.
+      // Latest offer per candidate.
       const offerByCandidate = new Map<
         string,
         { start_date: string | null; end_date: string | null; position: string | null }
@@ -168,7 +172,8 @@ export default function ExperienceLetter() {
 
       if (error) throw error;
 
-      // Attach the offer's internship period for prefill + display.
+      // Attach the offer's internship period for prefill + display, and flag
+      // whether the internship window has actually closed.
       return ((data ?? []) as unknown as Candidate[]).map((c) => {
         const o = offerByCandidate.get(c.id);
         return {
@@ -176,10 +181,22 @@ export default function ExperienceLetter() {
           internship_start: o?.start_date ?? null,
           internship_end: o?.end_date ?? null,
           offer_position: o?.position ?? null,
+          internship_completed: !!o?.end_date && o.end_date <= today,
         };
       });
     },
   });
+
+  // Scope toggle — "all" shows every offer-issued candidate, "completed" narrows
+  // to those whose internship closing date has already passed.
+  const scopedCandidates = useMemo(
+    () => (scope === "completed" ? candidates.filter((c) => c.internship_completed) : candidates),
+    [candidates, scope],
+  );
+  const completedCount = useMemo(
+    () => candidates.filter((c) => c.internship_completed).length,
+    [candidates],
+  );
 
   // Fetch all experience letters history
   const { data: experienceLettersHistory = [], isLoading: isHistoryLoading } = useQuery({
@@ -730,17 +747,17 @@ export default function ExperienceLetter() {
   // Filter candidates based on search term
   const filteredCandidates = useMemo(() => {
     if (!searchTerm.trim()) {
-      return candidates;
+      return scopedCandidates;
     }
-    
+
     const searchLower = searchTerm.toLowerCase();
-    return candidates.filter((candidate) => {
+    return scopedCandidates.filter((candidate) => {
       const nameMatch = candidate.full_name?.toLowerCase().includes(searchLower);
       const emailMatch = candidate.email?.toLowerCase().includes(searchLower);
       const phoneMatch = candidate.phone?.toLowerCase().includes(searchLower);
       return nameMatch || emailMatch || phoneMatch;
     });
-  }, [candidates, searchTerm]);
+  }, [scopedCandidates, searchTerm]);
 
   // Filter experience letters history based on search term
   const filteredExperienceLettersHistory = useMemo(() => {
@@ -897,20 +914,44 @@ export default function ExperienceLetter() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Experience Letter</h1>
           <p className="text-muted-foreground mt-1">
-            For interns whose offer was issued and whose internship closing date has passed — one certificate per intern
+            Every candidate issued an offer letter appears here — one certificate per intern
           </p>
         </div>
-        <Button 
+        <Button
           onClick={() => setAddCandidateDialogOpen(true)}
           className="bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-md"
         >
           <UserPlus className="h-4 w-4 mr-2" />
           Add New Candidate
         </Button>
+      </div>
+
+      {/* Scope toggle — all offer-issued vs only those whose internship has ended */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 bg-muted/20">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Show
+        </span>
+        <Button
+          size="sm"
+          variant={scope === "all" ? "default" : "outline"}
+          onClick={() => setScope("all")}
+        >
+          All offer-issued ({candidates.length})
+        </Button>
+        <Button
+          size="sm"
+          variant={scope === "completed" ? "default" : "outline"}
+          onClick={() => setScope("completed")}
+        >
+          Internship completed ({completedCount})
+        </Button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          Candidates who already have an experience letter are hidden — see the History tab.
+        </span>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -930,7 +971,7 @@ export default function ExperienceLetter() {
         </TabsList>
 
         <TabsContent value="generate" className="mt-6">
-          <CertificateGenerator candidates={candidates} isLoading={isLoading} />
+          <CertificateGenerator candidates={scopedCandidates} isLoading={isLoading} />
         </TabsContent>
 
         <TabsContent value="upload" className="space-y-6 mt-6">
@@ -953,7 +994,13 @@ export default function ExperienceLetter() {
       <div className="grid gap-6">
         {filteredCandidates.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            <p>{searchTerm ? "No candidates found matching your search." : "No interns are eligible yet. A candidate appears here once their offer is issued and their internship closing date has passed (and they don't already have an experience letter)."}</p>
+            <p>
+              {searchTerm
+                ? "No candidates found matching your search."
+                : scope === "completed"
+                  ? "No interns have finished their internship period yet. Switch to \"All offer-issued\" to see everyone who has been issued an offer letter."
+                  : "No candidates yet. A candidate appears here once an offer letter is issued to them (and they don't already have an experience letter)."}
+            </p>
           </div>
         ) : (
           filteredCandidates.map((candidate) => (

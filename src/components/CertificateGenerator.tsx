@@ -50,16 +50,30 @@ export interface CertificateCandidate {
   internship_start?: string | null;
   internship_end?: string | null;
   offer_position?: string | null;
+  internship_completed?: boolean;
   jobs?: { job_title: string; department?: string | null } | null;
 }
 
-// Internship-period chip — the offer window that makes a candidate eligible.
-function InternshipBadge({ start, end }: { start?: string | null; end?: string | null }) {
+// Internship-period chip — the offer window from the candidate's offer letter.
+// Green once the period has closed (letter is due), amber while still running.
+function InternshipBadge({
+  start,
+  end,
+  completed,
+}: {
+  start?: string | null;
+  end?: string | null;
+  completed?: boolean;
+}) {
   if (!start && !end) return null;
   const fmt = (d?: string | null) => (d ? format(new Date(d), "dd MMM yyyy") : "—");
+  const tone = completed
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+    : "bg-amber-500/15 text-amber-700 dark:text-amber-400";
   return (
-    <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${tone}`}>
       Internship: {fmt(start)} – {fmt(end)}
+      {completed ? " · Completed" : " · Ongoing"}
     </span>
   );
 }
@@ -521,7 +535,11 @@ export default function CertificateGenerator({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-foreground truncate">{c.full_name}</p>
-                  <InternshipBadge start={c.internship_start} end={c.internship_end} />
+                  <InternshipBadge
+                    start={c.internship_start}
+                    end={c.internship_end}
+                    completed={c.internship_completed}
+                  />
                 </div>
                 <p className="text-sm text-muted-foreground flex items-center gap-1 min-w-0">
                   <span className="truncate">{c.email}</span>
